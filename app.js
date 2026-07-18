@@ -48,6 +48,101 @@ const nbaTeams = [
 ];
 
 // ==========================================
+// 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
+// ==========================================
+// Pool de nombres genéricos para generar los otros 59 draftees (tu jugador
+// ocupa 1 de los 60 picks, el resto se completa al azar). No son jugadores
+// reales, son combinaciones random para darle cuerpo a la noche del Draft.
+// ==========================================
+// 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
+// ==========================================
+// Pool de nombres genéricos para generar los otros 59 draftees (tu jugador
+// ocupa 1 de los 60 picks, el resto se completa al azar). No son jugadores
+// reales, son combinaciones random para darle cuerpo a la noche del Draft.
+const NOMBRES_DRAFT = [
+    "Jalen", "Marcus", "Tyler", "Devin", "Xavier", "Isaiah", "Malik", "Cameron",
+    "Andre", "Terrence", "Darius", "Jaylen", "Kobe", "Elijah", "Amir", "Trey",
+    "Jordan", "Christian", "Zion", "Bryce", "Caleb", "Dominique", "Ezekiel", "Nasir",
+    "Quentin", "Rashad", "Sterling", "Tremaine", "Wesley", "Deshawn"
+];
+
+const APELLIDOS_DRAFT = [
+    "Whitfield", "Coleman", "Bridges", "Sanders", "Holloway", "Mercer", "Dunbar",
+    "Kessler", "Ashford", "Bellamy", "Carrington", "Donovan", "Emerson", "Fontaine",
+    "Grayson", "Hutchins", "Ivory", "Jensen", "Kirkland", "Lassiter", "Monroe",
+    "Norwood", "Ogden", "Pruitt", "Quintero", "Radcliffe", "Sinclair", "Thorne",
+    "Underwood", "Vance"
+];
+
+function generarNombreDraftAleatorio() {
+    const nombre = NOMBRES_DRAFT[Math.floor(Math.random() * NOMBRES_DRAFT.length)];
+    const apellido = APELLIDOS_DRAFT[Math.floor(Math.random() * APELLIDOS_DRAFT.length)];
+    return `${nombre} ${apellido}`;
+}
+
+// Arma las 60 posiciones del draft (30 equipos x 2 rondas), inserta a tu
+// jugador en el pick que le tocó y completa el resto con nombres al azar.
+// Si tenés carrera compartida activa, también intenta insertar al otro
+// jugador humano en su pick (si ya está guardado en Firestore para ese
+// mismo código de partida).
+function generarListaDraftCompleta(pickJugador, nombreJugador, equipoJugador, posicionJugador, draftInfoRival) {
+    const lista = [];
+    for (let i = 1; i <= 60; i++) {
+        const ronda = i <= 30 ? 1 : 2;
+        const equipoDelPick = nbaTeams[(i - 1) % 30];
+        lista.push({
+            pick: i,
+            ronda,
+            equipo: equipoDelPick,
+            nombre: generarNombreDraftAleatorio(),
+            esJugadorReal: false
+        });
+    }
+
+    const indicePropio = lista.findIndex(p => p.pick === pickJugador);
+    if (indicePropio !== -1) {
+        lista[indicePropio].nombre = `${nombreJugador} (${posicionJugador}) — VOS`;
+        lista[indicePropio].equipo = equipoJugador;
+        lista[indicePropio].esJugadorReal = true;
+    }
+
+    // 🆕 si hay datos del rival compartido, lo insertamos en su pick real
+    if (draftInfoRival) {
+        const indiceRival = lista.findIndex(p => p.pick === draftInfoRival.pick);
+        if (indiceRival !== -1) {
+            lista[indiceRival].nombre = `${draftInfoRival.nombre} (${draftInfoRival.posicion}) — RIVAL 🆚`;
+            lista[indiceRival].equipo = draftInfoRival.equipo;
+            lista[indiceRival].esJugadorRival = true;
+        }
+    }
+
+    return lista;
+}
+
+function renderizarListaDraftHTML(listaDraft) {
+    const filas = listaDraft.map(p => {
+        let claseEspecial = "";
+        if (p.esJugadorReal) claseEspecial = "draft-pick-propio";
+        else if (p.esJugadorRival) claseEspecial = "draft-pick-rival";
+
+        return `
+            <li class="draft-pick-row ${claseEspecial}">
+                <span class="draft-pick-num">#${p.pick}</span>
+                <span class="draft-pick-equipo">${p.equipo}</span>
+                <span class="draft-pick-nombre">${p.nombre}</span>
+            </li>
+        `;
+    }).join("");
+
+    return `
+        <details class="draft-board-details">
+            <summary>📋 Ver el Draft completo (60 picks)</summary>
+            <ul class="draft-board-list">${filas}</ul>
+        </details>
+    `;
+}
+
+// ==========================================
 // 🆕 MEJORA: CURVA DE DESARROLLO POR EDAD DE CARRERA
 // ==========================================
 // Antes: siempre +1 punto por año, sin importar la experiencia. Eso hacía
@@ -67,9 +162,9 @@ function calcularPuntosBaseDesarrollo(experience) {
 // ==========================================
 // FUNCIÓN PRINCIPAL: SIMULAR EL DRAFT ALEATORIO
 // ==========================================
-function simularDraft() {
-    asignarRivalDeFranquicia(); // 🆕 arranca tu primera rivalidad de carrera
-    cachearRivalHistorico(); // consulta el fantasma histórico en paralelo, sin frenar el juego
+async function simularDraft() {
+    asignarRivalDeFranquicia();
+    cachearRivalHistorico();
     const inputNombre = document.getElementById("firstname").value.trim();
     const inputApellido = document.getElementById("lastname").value.trim();
     const selectPosicion = document.getElementById("position").value;
@@ -83,36 +178,58 @@ function simularDraft() {
     gameState.player.lastName = inputApellido;
     gameState.player.position = selectPosicion;
 
-    const pickAleatorio = Math.floor(Math.random() * 60) + 1;
+    // 🆕 Modo Carrera Compartida (opcional)
+    const codigoIngresado = document.getElementById("codigo-partida").value.trim();
+    gameState.player.codigoPartida = codigoIngresado || null;
+    gameState.player.slotPropio = codigoIngresado ? document.getElementById("slot-jugador").value : null;
+
+    // 🆕 si hay carrera compartida, mira qué pick ya ocupó el rival (si ya
+    // hizo su Draft) para no repetir el mismo número.
+    let pickOcupadoPorRival = null;
+    if (tieneCarreraCompartida()) {
+        const draftRival = await obtenerPickDelRivalCompartido();
+        if (draftRival) pickOcupadoPorRival = draftRival.pick;
+    }
+
+    let pickAleatorio;
+    do {
+        pickAleatorio = Math.floor(Math.random() * 60) + 1;
+    } while (pickAleatorio === pickOcupadoPorRival);
+
     const equipoAleatorio = nbaTeams[Math.floor(Math.random() * nbaTeams.length)];
 
     gameState.player.currentTeam = equipoAleatorio;
     gameState.player.contractYearsLeft = 2;
-    asignarRivalDeFranquicia(); // 🆕 arranca tu primera rivalidad de carrera
+    gameState.player.pickDeDraft = pickAleatorio; // 🆕 se guarda para armar el listado
+    asignarRivalDeFranquicia();
 
-    // 🆕 MEJORA: subimos un poco el piso de puntos iniciales en todos los rangos
-    // de pick. Antes un pick tardío (31-60) arrancaba con solo 20 puntos para
-    // repartir en 10 atributos con piso 1 — quedaba condenado casi de entrada.
-    // Ahora todos los rangos tienen más margen para armar un jugador viable.
     let puntosOtorgados = 0;
     let minutosIniciales = 0;
 
     if (pickAleatorio >= 1 && pickAleatorio <= 5) {
-        puntosOtorgados = 65; // antes 50
+        puntosOtorgados = 65;
         minutosIniciales = Math.floor(Math.random() * 4) + 32;
     } else if (pickAleatorio >= 6 && pickAleatorio <= 15) {
-        puntosOtorgados = 55; // antes 40
+        puntosOtorgados = 55;
         minutosIniciales = Math.floor(Math.random() * 5) + 24;
     } else if (pickAleatorio >= 16 && pickAleatorio <= 30) {
-        puntosOtorgados = 42; // antes 30
+        puntosOtorgados = 42;
         minutosIniciales = Math.floor(Math.random() * 7) + 16;
     } else {
-        puntosOtorgados = 30; // antes 20
+        puntosOtorgados = 30;
         minutosIniciales = Math.floor(Math.random() * 5) + 8;
     }
 
     gameState.player.availablePoints = puntosOtorgados;
     gameState.player.minutesPerGame = minutosIniciales;
+
+    // 🆕 guarda tu pick en Firestore para que el otro dispositivo lo vea
+    guardarPickPropioCompartido({
+        pick: pickAleatorio,
+        equipo: equipoAleatorio,
+        nombre: `${inputNombre} ${inputApellido}`,
+        posicion: selectPosicion
+    });
 
     mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales);
 }
@@ -124,6 +241,9 @@ function simularDraft() {
 // pero no quedaba claro POR QUÉ. Este mensaje deja explícita la regla: no se
 // puede avanzar de temporada con puntos sin repartir.
 function generarMensajePuntosHint(puntos) {
+    if (puntos > 0 && todosLosAtributosAlTope()) {
+        return `<p id="puntos-hint" style="color: var(--scoreboard-green);">✅ Ya tenés todos los atributos al máximo (15). Los <strong>${puntos}</strong> punto(s) restantes no se pueden usar — ya podés confirmar.</p>`;
+    }
     if (puntos > 0) {
         return `<p id="puntos-hint" style="color: var(--hardwood);">⚠️ Repartí los <strong>${puntos}</strong> punto(s) restantes para poder confirmar y simular la temporada.</p>`;
     }
@@ -150,6 +270,10 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
             <h3>${gameState.player.firstName} ${gameState.player.lastName} (${gameState.player.position})</h3>
         </div>
 
+        <div id="draft-board-container">
+            ${renderizarListaDraftHTML(generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, null))}
+        </div>
+
         <div class="status-box">
             <p><strong>Contrato firmado:</strong> 2 Años obligatorios (Escala de Rookie).</p>
             <p><strong>Tiempo en cancha inicial:</strong> Jugarás aprox. <strong>${minutos} minutos</strong> por partido debido a tu posición de Draft.</p>
@@ -173,6 +297,20 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
 
     const btnConfirmar = document.getElementById("btn-confirmar-atributos");
     btnConfirmar.onclick = iniciarTemporadaUno;
+
+    // 🆕 si hay carrera compartida, busca el pick del rival (por si ya
+    // drafteó) y actualiza el listado con su nombre insertado.
+    if (tieneCarreraCompartida()) {
+        obtenerPickDelRivalCompartido().then(draftInfoRival => {
+            if (!draftInfoRival) return;
+            const contenedor = document.getElementById("draft-board-container");
+            if (contenedor) {
+                contenedor.innerHTML = renderizarListaDraftHTML(
+                    generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
+                );
+            }
+        });
+    }
 }
 
 // ==========================================
@@ -511,14 +649,12 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     // porque en la cancha real el hándil es lo que te permite crearte tu propio
     // tiro. Antes era un atributo "de adorno" que solo servía para no activar
     // una penalización — si le metías puntos, no rendía nada a cambio.
-    const nivelTiro = (((attrs.tiroExt * 1.2 + attrs.tiroInt * 1.0 + attrs.bandejas * 1.1 + attrs.dribbling * 0.5) / 3.8) / 15) * bonoPos.tiro;
-    const nivelPases = (((attrs.vision * 0.8 + attrs.pases * 0.4) / 1.2) / 15) * bonoPos.pases;
-    const nivelReboteo = (((attrs.defInt * 0.5 + attrs.fuerza * 0.6 + attrs.fisico * 0.3) / 1.4) / 15) * bonoPos.reboteo;
-    // 🆕 MEJORA: robos y tapones ahora son stats reales de la planilla, no
-    // solo un número interno. Robos sale de la defensa exterior (anticipación,
-    // manos rápidas), tapones de la defensa interior (protección de aro).
-    const nivelRobos = (attrs.defExt / 15) * bonoPos.robos;
-    const nivelTapones = (attrs.defInt / 15) * bonoPos.tapones;
+    Tiro = (((attrs.tiroExt * 1.2 + attrs.tiroInt * 1.0 + attrs.bandejas * 1.1 + attrs.dribbling * 0.5) / 3.8) / 15) * bonoPos.tiro;
+    const nivelTiro = Math.min(1, (((attrs.tiroExt * 1.2 + attrs.tiroInt * 1.0 + attrs.bandejas * 1.1 + attrs.dribbling * 0.5) / 3.8) / 15) * bonoPos.tiro);
+    const nivelPases = Math.min(1, (((attrs.vision * 0.8 + attrs.pases * 0.4) / 1.2) / 15) * bonoPos.pases);
+    const nivelReboteo = Math.min(1, (((attrs.defInt * 0.5 + attrs.fuerza * 0.6 + attrs.fisico * 0.3) / 1.4) / 15) * bonoPos.reboteo);
+    const nivelRobos = Math.min(1, (attrs.defExt / 15) * bonoPos.robos);
+    const nivelTapones = Math.min(1, (attrs.defInt / 15) * bonoPos.tapones);
 
     // 🆕 MEJORA: cada stat ahora tiene su propio "atributo de apoyo" que
     // castiga la especialización pura (ver calcularFactorEspecializacion):
@@ -1013,6 +1149,7 @@ function mostrarResultadosTemporada(res) {
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarEventoHTML(res.mensajeEvento)}
+        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1032,17 +1169,21 @@ function mostrarResultadosTemporada(res) {
 
         <button onclick="irAEntrenamientoAñoDos()">Ir a entrenar para el Año 2 🏋️‍♂️</button>
     `;
+
+    sincronizarCarreraCompartida();
 }
 
 // ==========================================
 // PANTALLA: ENTRENAMIENTO PREVIO AL AÑO 2
 // ==========================================
 function irAEntrenamientoAñoDos() {
-    if (gameState.player.isRetired) return; // 🆕 FIX: no entrenar post-retiro
+    if (gameState.player.isRetired) return;
 
-    gameState.player.enfoqueTemporada = null; // 🆕 hay que elegir de nuevo el enfoque cada temporada
+    gameState.player.enfoqueTemporada = null;
+    gameState.player.enfoquesDisponiblesTemporada = null; // 🆕 vuelve a sortear opciones nuevas
 
     document.getElementById("season-screen").classList.add("hidden");
+    // ...el resto queda igual...
 
     const screen = document.getElementById("draft-screen");
     screen.classList.remove("hidden");
@@ -1140,6 +1281,7 @@ function mostrarResultadosAñoDos(res) {
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
+        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1159,6 +1301,8 @@ function mostrarResultadosAñoDos(res) {
 
         <button onclick="procesarAgenciaLibreOGameOver()">Ir a la Oficina: Ver ofertas o Retiro 💼</button>
     `;
+
+    sincronizarCarreraCompartida();
 }
 
 // ==========================================
@@ -1260,10 +1404,18 @@ function procesarAgenciaLibreOGameOver() {
     const promedioPer36Reciente = obtenerPromedioPer36Reciente();
     const rendimientoCombinado = pts + ast + reb + (stl + blk) * 3;
 
-    if (promedioPer36Reciente < 5.0) {
+    // 🆕 mismo criterio de exigencia por edad que en chequearRetiroDefinitivo,
+    // para que sea consistente: cuanto más veterano, más rendimiento
+    // reciente te exige la liga para seguir dándote contrato.
+    const player = gameState.player;
+    const umbralBase = 5.0;
+    const exigenciaPorEdad = player.age >= 32 ? (player.age - 31) * 0.9 : 0;
+    const umbralActual = umbralBase + exigenciaPorEdad;
+
+    if (promedioPer36Reciente < umbralActual) {
         ejecutarPantallaRetiro(
-            `Fin de la Carrera: Fuera de la Liga. Tus números esta temporada (${pts} PTS, ${ast} AST, ${reb} REB) fueron demasiado bajos para el nivel exigido en la NBA, incluso ajustando por los pocos minutos que jugaste. Ninguna franquicia mostró interés y decidís retirarte de manera prematura.`,
-            true // 🆕 corte forzado: pesa distinto en la clasificación final del HOF
+            `Fin de la Carrera: Fuera de la Liga. Tus números esta temporada (${pts} PTS, ${ast} AST, ${reb} REB) fueron demasiado bajos para el nivel exigido en la NBA a tu edad, incluso ajustando por los pocos minutos que jugaste. Ninguna franquicia mostró interés y decidís retirarte de manera prematura.`,
+            true
         );
         return;
     }
@@ -1386,18 +1538,21 @@ function simularSiguienteAño() {
 // riesgo por más números, jugar seguro, priorizar al equipo, o el término
 // medio de siempre. Se conecta directo con el sistema de lesiones (jugar
 // arriesgado sube la probabilidad de lesionarte).
+// Enfoques con injuryMultiplier ajustado — el salto entre "riesgo normal" y
+// "riesgo alto" ahora es mucho más marcado, para que el trade-off pese de
+// verdad y no sea una decisión sin sacrificio real.
 const ENFOQUES_TEMPORADA = {
     agresivo: {
         nombre: "Modo Estrella 🌟",
         descripcion: "Buscás protagonismo total: más tiros, más responsabilidad, más minutos de riesgo. Sube mucho tu producción ofensiva pero descuida el resto del juego y el desgaste físico es real.",
         pts: 1.32, ast: 0.90, reb: 0.88, stl: 0.85, blk: 0.85,
-        injuryMultiplier: 1.65
+        injuryMultiplier: 2.6   // antes 1.65
     },
     conservador: {
         nombre: "Cuidar el Cuerpo 🧊",
         descripcion: "Jugás con el freno de mano puesto para llegar entero a fin de año. Baja fuerte tu producción, pero el riesgo de lesión se reduce muchísimo.",
         pts: 0.72, ast: 0.78, reb: 0.78, stl: 0.80, blk: 0.80,
-        injuryMultiplier: 0.40
+        injuryMultiplier: 0.35  // antes 0.40, un poco más de recompensa por jugar seguro
     },
     equipo: {
         nombre: "Juego de Equipo 🤝",
@@ -1410,6 +1565,42 @@ const ENFOQUES_TEMPORADA = {
         descripcion: "Ni arriesgás de más ni te guardás: jugás tu juego de siempre, sin cambios.",
         pts: 1.0, ast: 1.0, reb: 1.0, stl: 1.0, blk: 1.0,
         injuryMultiplier: 1.0
+    },
+    candado: {
+        nombre: "Modo Candado 🔒",
+        descripcion: "Te olvidás del ataque y te ponés como misión frenar al rival. Tu planilla ofensiva se resiente fuerte, pero tu impacto defensivo (robos y tapones) se dispara.",
+        pts: 0.65, ast: 0.85, reb: 0.95, stl: 1.55, blk: 1.55,
+        injuryMultiplier: 1.20
+    },
+    facilitador: {
+        nombre: "Armador Puro 🎯",
+        descripcion: "Bajás tu volumen de tiro casi a cero para dedicarte pura y exclusivamente a generarle juego a tus compañeros. Menos puntos que nunca, pero un nivel de asistencias fuera de serie.",
+        pts: 0.55, ast: 1.60, reb: 0.85, stl: 1.05, blk: 0.75,
+        injuryMultiplier: 0.85
+    },
+    todoterreno: {
+        nombre: "Todoterreno 🧩",
+        descripcion: "No sobresalís en nada puntual, pero rendís parejo en todos lados: un poco más de todo, sin picos ni bajones marcados. Ideal para sumar en cualquier planilla sin exponerte de más.",
+        pts: 1.08, ast: 1.08, reb: 1.08, stl: 1.08, blk: 1.08,
+        injuryMultiplier: 1.15
+    },
+    alto_riesgo: {
+        nombre: "Todo o Nada 🎲",
+        descripcion: "Vas con todo, sin frenos, en cada faceta del juego. Tu techo es altísimo, pero también tu piso: puede ser tu mejor temporada o un desastre físico y estadístico.",
+        pts: 1.20, ast: 1.20, reb: 1.20, stl: 1.20, blk: 1.20,
+        injuryMultiplier: 2.9   // antes 1.75, el más riesgoso de todos
+    },
+    rebotero: {
+        nombre: "Máquina de Rebotes 🧱",
+        descripcion: "Vivís pegado al aro peleando cada pelota dividida. Sacrificás asistencias y algo de tiro exterior, pero tu nivel de rebote se dispara muy por encima de lo normal.",
+        pts: 0.85, ast: 0.70, reb: 1.55, stl: 0.90, blk: 1.10,
+        injuryMultiplier: 1.75  // el roce bajo el aro también castiga físicamente
+    },
+    showman: {
+        nombre: "Showman 🎪",
+        descripcion: "Jugás para la tribuna: jugadas vistosas, tiros de media/larga distancia y asistencias espectaculares. Descuidás el rebote y la defensa, pero el show ofensivo es total.",
+        pts: 1.22, ast: 1.22, reb: 0.70, stl: 0.75, blk: 0.70,
+        injuryMultiplier: 1.90
     }
 };
 
@@ -1418,9 +1609,38 @@ function obtenerEnfoqueActivo() {
     return ENFOQUES_TEMPORADA[key] || ENFOQUES_TEMPORADA.profesional;
 }
 
+// 🆕 MEJORA: en vez de mostrar siempre las mismas 8 opciones (lo que hacía
+// que terminaras usando siempre las mismas 2-3 favoritas), cada temporada se
+// sortean 3 enfoques al azar + "Profesional" (que siempre está disponible
+// como opción segura de base). Así la decisión real cambia año a año, sin
+// perder la opción neutral de siempre.
+function sortearEnfoquesDeLaTemporada() {
+    const keysNoProfesional = Object.keys(ENFOQUES_TEMPORADA).filter(k => k !== "profesional");
+    const copia = [...keysNoProfesional];
+    const elegidos = [];
+
+    const cantidadASortear = Math.min(3, copia.length);
+    for (let i = 0; i < cantidadASortear; i++) {
+        const indice = Math.floor(Math.random() * copia.length);
+        elegidos.push(copia.splice(indice, 1)[0]);
+    }
+
+    return [...elegidos, "profesional"];
+}
+
 function renderizarSelectorEnfoque() {
     const seleccionado = gameState.player.enfoqueTemporada;
-    const cards = Object.keys(ENFOQUES_TEMPORADA).map(key => {
+
+    // 🆕 se sortea una sola vez por temporada y se guarda, para que no
+    // cambien las opciones si la pantalla se vuelve a dibujar (por ejemplo
+    // al seleccionar un atributo).
+    if (!gameState.player.enfoquesDisponiblesTemporada) {
+        gameState.player.enfoquesDisponiblesTemporada = sortearEnfoquesDeLaTemporada();
+    }
+
+    const keysDisponibles = gameState.player.enfoquesDisponiblesTemporada;
+
+    const cards = keysDisponibles.map(key => {
         const enfoque = ENFOQUES_TEMPORADA[key];
         const activa = seleccionado === key ? "enfoque-card-activa" : "";
         return `
@@ -1482,8 +1702,10 @@ function calcularProbabilidadLesion() {
     const factorMinutos = player.minutesPerGame / 36; // más cancha, más exposición
     const factorEdad = player.age >= 30 ? 1 + (player.age - 29) * 0.055 : 1.0;
     const resistenciaFisica = (attrs.fisico + attrs.fuerza) / 30; // 0 (débil) a 1 (fuerte)
-    const factorResistencia = 1.35 - resistenciaFisica * 0.65; // menos físico/fuerza = más riesgo
-    // 🆕 jugadores "de vidrio": cada lesión moderada/grave previa suma propensión,
+// 🆕 antes iba de 1.35 (débil) a 0.70 (fuerte) — el físico casi anulaba
+// el riesgo. Ahora el rango es más angosto, así el enfoque elegido sigue
+// pesando de verdad aunque tengas buen físico/fuerza.
+const factorResistencia = 1.20 - resistenciaFisica * 0.40; // antes: 1.35 - resistenciaFisica * 0.65    // 🆕 jugadores "de vidrio": cada lesión moderada/grave previa suma propensión,
     // hasta un techo, para que un historial cargado se sienta cada vez más frágil.
     const factorPropension = 1 + Math.min(player.injuryHistory * 0.14, 0.65);
 
@@ -1755,8 +1977,16 @@ function chequearRetiroDefinitivo() {
         return true;
     }
 
-    if (player.experience > 4 && promedioPer36Reciente < 5.0) {
-        ejecutarPantallaRetiro(`Retiro Prematuro: Con ${player.age} años, tu nivel de juego cayó demasiado bajo (${ultimoAño.pts} PTS, ${ultimoAño.ast} AST esta temporada). Decidís retirarte con dignidad antes de que la liga te olvide.`, true);
+    // 🆕 MEJORA: el umbral de "sos demasiado flojo para seguir" ya no es fijo
+    // en 5.0. Sube con la edad: la liga exige cada vez más rendimiento a un
+    // veterano para justificarle un lugar en el roster. A los 24 con un 5.0
+    // de per36 te bancan un año más; a los 36 con ese mismo nivel, ya no.
+    const umbralBase = 5.0;
+    const exigenciaPorEdad = player.age >= 32 ? (player.age - 31) * 0.9 : 0;
+    const umbralActual = umbralBase + exigenciaPorEdad;
+
+    if (player.experience > 4 && promedioPer36Reciente < umbralActual) {
+        ejecutarPantallaRetiro(`Retiro Prematuro: Con ${player.age} años, tu nivel de juego cayó demasiado bajo (${ultimoAño.pts} PTS, ${ultimoAño.ast} AST esta temporada) para seguir siendo una opción viable en la liga. Decidís retirarte con dignidad antes de que la liga te olvide.`, true);
         return true;
     }
 
@@ -1765,7 +1995,7 @@ function chequearRetiroDefinitivo() {
     // retirarse por voluntad propia empieza antes (desde los 31, no 33) y es
     // más probable a cualquier edad. No es un límite duro — solo se inclina
     // la balanza, como en la vida real con un cuerpo castigado.
-    const esJugadorDeVidrio = player.injuryHistory >= 4;
+    const esJugadorDeVidrio = player.injuryHistory >= 3; // antes 4
     const edadMinimaRetiroVoluntario = esJugadorDeVidrio ? 31 : 33;
 
     if (player.age >= edadMinimaRetiroVoluntario) {
@@ -1789,12 +2019,6 @@ function chequearRetiroDefinitivo() {
 // INTERFAZ: PANTALLA DEL BUCLE DE CARRERA (AÑOS 3+)
 // ==========================================
 function mostrarPantallaBucleCarrera(res) {
-    // 🆕 FIX: a diferencia de mostrarResultadosTemporada (año 1) y
-    // mostrarResultadosAñoDos (año 2), esta función nunca ocultaba
-    // draft-screen (reutilizada como pantalla de entrenamiento). Por eso a
-    // partir del año 3 la pantalla de entrenamiento ya usada quedaba visible
-    // arriba, y los resultados/ofertas de agencia libre se veían "apilados"
-    // debajo en vez de reemplazarla limpiamente como en los primeros 2 años.
     const trainingScreen = document.getElementById("draft-screen");
     if (trainingScreen) {
         trainingScreen.classList.add("hidden");
@@ -1845,6 +2069,7 @@ function mostrarPantallaBucleCarrera(res) {
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
+        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1860,6 +2085,8 @@ function mostrarPantallaBucleCarrera(res) {
 
         ${seccionAcciones}
     `;
+
+    sincronizarCarreraCompartida();
 }
 
 function avanzarProximaTemporada() {
@@ -2096,24 +2323,130 @@ async function mostrarLeaderboard() {
 }
 
 // ==========================================
-// 🆕 FIX: BLOQUEO DE ZOOM POR DOBLE-TAP, sin frenar toques rápidos en botones
+// 🆕 FIX: BLOQUEO DE ZOOM POR DOBLE-TAP (mobile/iOS) — versión segura
 // ==========================================
-// Antes comparaba CUALQUIER toque contra el anterior en toda la pantalla,
-// así que tocar rápido el mismo botón +/- varias veces seguidas (algo común
-// al repartir muchos puntos) quedaba atrapado por error y el toque se
-// cancelaba. Ahora solo bloquea si el doble toque es sobre el MISMO
-// elemento, que es lo que realmente dispara el zoom nativo en iOS.
-let ultimoToqueGlobal = 0;
-let ultimoElementoTocado = null;
+// En vez de interceptar touchstart y re-disparar el click a mano (que podía
+// bloquear toques reales, como confirmar justo después de tocar un
+// atributo), bloqueamos directamente los eventos que iOS usa para generar
+// el zoom (gesturestart, y el doble-click sintético), sin tocar el flujo
+// normal de ningún botón.
+document.addEventListener("gesturestart", (e) => e.preventDefault());
 
+let ultimoToqueGlobal = 0;
 document.addEventListener("touchend", (e) => {
     const ahora = Date.now();
-    const mismoElemento = e.target === ultimoElementoTocado;
-
-    if (ahora - ultimoToqueGlobal <= 150 && mismoElemento) {
+    if (ahora - ultimoToqueGlobal <= 180) {
         e.preventDefault();
     }
-
     ultimoToqueGlobal = ahora;
-    ultimoElementoTocado = e.target;
 }, { passive: false });
+
+function todosLosAtributosAlTope() {
+    return Object.values(gameState.attributes).every(v => v >= 15);
+}
+
+function actualizarEstadoBotonConfirmar() {
+    const btnConfirmar = document.getElementById("btn-confirmar-atributos");
+    if (!btnConfirmar) return;
+    const puntosListos = gameState.player.availablePoints === 0 || todosLosAtributosAlTope();
+    const enfoqueListo = gameState.player.enfoqueTemporada !== null;
+    btnConfirmar.disabled = !(puntosListos && enfoqueListo);
+}
+
+// ==========================================
+// 🆕 NUEVO: CARRERA COMPARTIDA (dos dispositivos, mismo código de partida)
+// ==========================================
+// Cada jugador guarda un resumen de su progreso en Firestore bajo un
+// documento identificado por el código de partida que ambos ingresaron. No
+// es sincronización en vivo estricta (no hay turnos ni bloqueo), cada uno
+// juega a su ritmo — pero cada vez que termina una temporada, se actualiza
+// su "foto" más reciente, y el otro la puede ver en su propia pantalla de
+// resultados.
+
+function tieneCarreraCompartida() {
+    return !!(gameState.player.codigoPartida && gameState.player.slotPropio);
+}
+
+function construirResumenDeProgreso() {
+    const player = gameState.player;
+    const ultimo = gameState.statsHistory[gameState.statsHistory.length - 1];
+    return {
+        firstName: player.firstName,
+        lastName: player.lastName,
+        position: player.position,
+        team: player.currentTeam,
+        year: player.experience,
+        age: player.age,
+        pts: ultimo ? ultimo.pts : 0,
+        ast: ultimo ? ultimo.ast : 0,
+        reb: ultimo ? ultimo.reb : 0,
+        rendimientoPer36: ultimo ? ultimo.rendimientoPer36 : 0,
+        isRetired: player.isRetired,
+        updatedAt: Date.now()
+    };
+}
+
+async function guardarProgresoCompartido() {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const resumen = construirResumenDeProgreso();
+        await setDoc(refPartida, { [gameState.player.slotPropio]: resumen }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el progreso compartido:", e);
+    }
+}
+
+async function obtenerProgresoDelRivalCompartido() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+
+        const data = snap.data();
+        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
+        return data[slotRival] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el progreso del rival compartido:", e);
+        return null;
+    }
+}
+
+function renderizarProgresoRivalCompartidoHTML(datosRival) {
+    if (!datosRival) {
+        return `
+            <div class="status-box alert-equipo" id="rival-compartido-box">
+                <p>🆚 Todavía no hay datos de tu compañero de partida en este código, o él/ella aún no jugó su primera temporada.</p>
+            </div>
+        `;
+    }
+    if (datosRival.isRetired) {
+        return `
+            <div class="status-box alert-equipo" id="rival-compartido-box">
+                <p>🆚 <strong>${datosRival.firstName} ${datosRival.lastName}</strong> ya se retiró de su carrera.</p>
+            </div>
+        `;
+    }
+    return `
+        <div class="status-box alert-equipo" id="rival-compartido-box">
+            <p>🆚 <strong>${datosRival.firstName} ${datosRival.lastName}</strong> (${datosRival.position}) va en el <strong>Año ${datosRival.year}</strong>, ${datosRival.age} años, jugando en los ${datosRival.team}. Última temporada: ${datosRival.pts} PTS / ${datosRival.ast} AST / ${datosRival.reb} REB.</p>
+        </div>
+    `;
+}
+
+// Guarda el progreso propio y, en paralelo, busca e inyecta el del rival en
+// el contenedor con id="rival-compartido-box" si existe en la pantalla.
+async function sincronizarCarreraCompartida() {
+    if (!tieneCarreraCompartida()) return;
+
+    guardarProgresoCompartido(); // no bloqueante, no hace falta esperar
+
+    const datosRival = await obtenerProgresoDelRivalCompartido();
+    const contenedor = document.getElementById("rival-compartido-box");
+    if (contenedor) {
+        contenedor.outerHTML = renderizarProgresoRivalCompartidoHTML(datosRival);
+    }
+}
