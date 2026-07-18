@@ -53,6 +53,23 @@ async function guardarPickPropioCompartido(datosPick) {
     }
 }
 
+async function obtenerPickDelRivalCompartido() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+
+        const data = snap.data();
+        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
+        return data[`draft_${slotRival}`] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el pick del rival compartido:", e);
+        return null;
+    }
+}
+
 // ==========================================
 // 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
 // ==========================================
