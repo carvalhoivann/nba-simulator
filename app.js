@@ -1269,7 +1269,6 @@ function mostrarResultadosTemporada(res) {
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarEventoHTML(res.mensajeEvento)}
-        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1407,7 +1406,6 @@ function mostrarResultadosAñoDos(res) {
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
-        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1833,7 +1831,7 @@ function calcularProbabilidadLesion() {
 
     const factorMinutos = player.minutesPerGame / 36; // más cancha, más exposición
     const factorEdad = player.age >= 30 ? 1 + (player.age - 29) * 0.055 : 1.0;
-    const resistenciaFisica = (attrs.fisico + attrs.fuerza) / 40; // 0 (débil) a 1 (fuerte)
+    const resistenciaFisica = (attrs.resistencia + attrs.fuerza) / 40; // 0 (débil) a 1 (fuerte)
 // 🆕 antes iba de 1.35 (débil) a 0.70 (fuerte) — el físico casi anulaba
 // el riesgo. Ahora el rango es más angosto, así el enfoque elegido sigue
 // pesando de verdad aunque tengas buen físico/fuerza.
@@ -2213,7 +2211,6 @@ function mostrarPantallaBucleCarrera(res) {
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
-        ${tieneCarreraCompartida() ? renderizarProgresoRivalCompartidoHTML(null) : ""}
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -2585,16 +2582,31 @@ function renderizarProgresoRivalCompartidoHTML(datosRival) {
 
 // Guarda el progreso propio y, en paralelo, busca e inyecta el del rival en
 // el contenedor con id="rival-compartido-box" si existe en la pantalla.
+let intervaloProgresoRival = null;
+
 async function sincronizarCarreraCompartida() {
     if (!tieneCarreraCompartida()) return;
 
     guardarProgresoCompartido(); // no bloqueante, no hace falta esperar
 
-    const datosRival = await obtenerProgresoDelRivalCompartido();
-    const contenedor = document.getElementById("rival-compartido-box");
-    if (contenedor) {
+    const actualizar = async () => {
+        const contenedor = document.getElementById("rival-compartido-box");
+        if (!contenedor) {
+            // Ya no estamos en una pantalla con ese cartel, dejamos de preguntar
+            if (intervaloProgresoRival) {
+                clearInterval(intervaloProgresoRival);
+                intervaloProgresoRival = null;
+            }
+            return;
+        }
+        const datosRival = await obtenerProgresoDelRivalCompartido();
         contenedor.outerHTML = renderizarProgresoRivalCompartidoHTML(datosRival);
-    }
+    };
+
+    await actualizar();
+
+    if (intervaloProgresoRival) clearInterval(intervaloProgresoRival);
+    intervaloProgresoRival = setInterval(actualizar, 6000);
 }
 
 // ==========================================
@@ -2739,14 +2751,18 @@ function mostrarPantallaCeremoniaConjunta(resultadoPropio, resultadoRival) {
     if (!esperaScreen) return;
 
     const items = resultadoPropio.logros.map(l => `<li>${l.nombre} <strong>(+${l.puntos})</strong></li>`).join("");
+    const logrosRival = resolverPremiosCompartidos(resultadoRival, resultadoPropio).logros;
 
     esperaScreen.innerHTML = `
         <h2>🏆 Ceremonia de Premios — Año ${resultadoPropio.year}</h2>
         <div class="status-box alert-equipo">
-            <p><strong>Vos:</strong> ${resultadoPropio.pts} PTS / ${resultadoPropio.ast} AST / ${resultadoPropio.reb} REB — ${resultadoPropio.team}</p>
-            <p><strong>${resultadoRival.nombreJugador}:</strong> ${resultadoRival.pts} PTS / ${resultadoRival.ast} AST / ${resultadoRival.reb} REB — ${resultadoRival.team}</p>
+            <p><strong>Vos:</strong> ${resultadoPropio.pts} PTS / ${resultadoPropio.ast} AST / ${resultadoPropio.reb} REB / ${resultadoPropio.stl} STL / ${resultadoPropio.blk} BLK — ${resultadoPropio.team}</p>
+            <p><strong>${resultadoRival.nombreJugador}:</strong> ${resultadoRival.pts} PTS / ${resultadoRival.ast} AST / ${resultadoRival.reb} REB / ${resultadoRival.stl} STL / ${resultadoRival.blk} BLK — ${resultadoRival.team}</p>
         </div>
+        <h3>🏅 Tus logros</h3>
         ${renderizarLogrosHTML(resultadoPropio.logros)}
-        <p style="text-align:center; opacity:0.7;">Continuando en unos segundos...</p>
+        <h3>🏅 Logros de ${resultadoRival.nombreJugador}</h3>
+        ${renderizarLogrosHTML(logrosRival)}
+        <p style="text-align:center; opacity:0.7;">Continuando en unos segundos...</p>        
     `;
 }
