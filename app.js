@@ -290,6 +290,69 @@ function calcularPromedioPonderadoPorPosicion() {
     return promedio;
 }
 
+// ==========================================
+// 🆕 MEJORA: MINUTOS DINÁMICOS AÑO A AÑO
+// ==========================================
+// Antes los minutos se fijaban una sola vez en el Draft y se recalculaban
+// SOLO una vez más en el Año 2 (con 3 escalones fijos muy gruesos). Del Año 3
+// en adelante quedaban congelados para siempre, sin importar cuánto mejorara
+// el jugador. Ahora se recalculan TODOS los años con una escala continua
+// (no 3 casilleros) y hay chance real de "dar el salto" (breakout) si venís
+// relegado pero rindiendo bien, o de perder terreno (regresión) aunque
+// tengas buen nivel — como en la vida real, no todo depende solo de tu GRL.
+function calcularMinutosDelAño(modificadorSuerte) {
+    const player = gameState.player;
+    const grl = calcularPromedioPonderadoPorPosicion(); // 1 a 15
+
+    const fraccion = (grl - 1) / 14; // 0 (piso) a 1 (techo absoluto)
+    let base = 6 + fraccion * 32; // escala continua: 6 a 38 minutos según nivel
+
+    // Ruido normal de un año a otro: competencia en el roster, preferencias
+    // del cuerpo técnico, fichajes nuevos que te compiten el puesto, etc.
+    base += (Math.random() - 0.5) * 6; // ±3
+
+    // Tu rendimiento reciente influye en la confianza del entrenador
+    if (gameState.statsHistory.length > 0) {
+        const ultimo = gameState.statsHistory[gameState.statsHistory.length - 1];
+        if (ultimo.rendimientoPer36 >= 30) base += 3;
+        else if (ultimo.rendimientoPer36 <= 8) base -= 3;
+    }
+
+    // 🆕 El "tipo de año" (suerte) también empuja los minutos: un año de
+    // gracia genera más confianza del cuerpo técnico, un año de bajón te
+    // puede sacar del rotation. Rango: modificadorSuerte 0.65 (maldita) a
+    // 1.42 (histórica), centrado en ~1.05, así que esto suma entre -4.8 y +4.4.
+    base += (modificadorSuerte - 1.05) * 12;
+
+    // Chance de BREAKOUT: relegado pero con nivel real para más minutos.
+    // Un año de gracia/racha (suerte alta) duplica la chance de que se dé.
+    let huboBreakout = false;
+    let huboRegresion = false;
+    const probBreakoutBase = modificadorSuerte >= 1.15 ? 0.32 : 0.18;
+    const probRegresionBase = modificadorSuerte <= 0.85 ? 0.20 : 0.10;
+
+    if (player.minutesPerGame <= 18 && grl >= 8 && Math.random() < probBreakoutBase) {
+        base += 10 + Math.random() * 8;
+        huboBreakout = true;
+    } else if (player.minutesPerGame >= 24 && Math.random() < probRegresionBase) {
+        base -= 8 + Math.random() * 8;
+        huboRegresion = true;
+    }
+
+    const minutos = Math.round(Math.max(4, Math.min(40, base)));
+    return { minutos, huboBreakout, huboRegresion };
+}
+
+function renderizarMensajeMinutosHTML(huboBreakout, huboRegresion, minutosNuevos) {
+    if (huboBreakout) {
+        return `<div class="status-box alert-evento"><p>📈 <strong>¡Diste el salto!</strong> El cuerpo técnico te subió en la rotación: ahora vas a jugar cerca de <strong>${minutosNuevos} minutos</strong> por partido.</p></div>`;
+    }
+    if (huboRegresion) {
+        return `<div class="status-box alert-warning"><p>📉 <strong>Perdiste terreno en la rotación.</strong> La competencia interna te bajó a cerca de <strong>${minutosNuevos} minutos</strong> por partido esta temporada.</p></div>`;
+    }
+    return "";
+}
+
 function calcularGRL() {
     const attrs = gameState.attributes;
     const pesos = pesosGRLPorPosicion[gameState.player.position];
@@ -380,19 +443,16 @@ function generarRuidoStat() {
     return 0.86 + Math.random() * 0.28; // rango típico (0.86 - 1.14)
 }
 
-function calcularEstadisticasDelAño() {
-    const attrs = gameState.attributes;
-    const player = gameState.player;
-    const bonoPos = obtenerBonoPosicion(player.position);
-
-    // 🆕 MEJORA: antes el "azar del año" tenía solo 3 valores posibles (1.20 /
-    // 1.0 / 0.90), y el del medio salía el 80% de las veces — por eso, una vez
-    // que armabas un build, temporada tras temporada tirabas casi el mismo
-    // número. Ahora es una distribución continua (promedio de 3 tiradas, así
-    // se concentra alrededor del centro pero varía de verdad de un año a otro)
-    // más un evento más frecuente (10% total) de temporada histórica o
-    // directamente maldita, para que ningún año se sienta calcado al anterior
-    // y un jugador "normal" también pueda tener un año fuera de serie.
+// ==========================================
+// 🆕 MEJORA: SUERTE DEL AÑO, CALCULADA UNA SOLA VEZ
+// ==========================================
+// Antes el "tipo de año" (racha, bajón, temporada histórica) se calculaba
+// DENTRO de calcularEstadisticasDelAño y no influía en nada más — los
+// minutos eran ciegos a si estabas en tu mejor momento o en un bajón. Ahora
+// se calcula primero, una sola vez por temporada, y tanto los minutos como
+// las stats usan el MISMO resultado: un año de gracia te puede ganar
+// rotación, un año de bajón te la puede hacer perder.
+function generarSuerteDelAño() {
     const promedioTresTiradas = (Math.random() + Math.random() + Math.random()) / 3;
     let modificadorSuerte = 0.75 + promedioTresTiradas * 0.60; // rango típico ~0.75 - 1.35
     let tipoAño = "Año Estándar";
@@ -414,6 +474,14 @@ function calcularEstadisticasDelAño() {
         modificadorSuerte = 0.65;
         tipoAño = "Temporada Maldita: lesiones y mala suerte todo el año 🤕";
     }
+
+    return { modificadorSuerte, tipoAño };
+}
+
+function calcularEstadisticasDelAño() {
+    const attrs = gameState.attributes;
+    const player = gameState.player;
+    const bonoPos = obtenerBonoPosicion(player.position);
 
     // 🆕 MEJORA: ruido independiente por categoría (ahora las 5 stats, no solo
     // 3), con chance propia de anomalía en cada una — ver generarRuidoStat().
@@ -884,8 +952,9 @@ function obtenerPromedioPer36Reciente() {
 // ==========================================
 function iniciarTemporadaUno() {
     const player = gameState.player;
-    const calidadEquipo = sortearCalidadEquipo(); // 🆕
-    const { pts, ast, reb, stl, blk, tipoAño, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion();
+    const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
+    const calidadEquipo = sortearCalidadEquipo();
+    const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
 
     const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo);
 
@@ -1011,18 +1080,12 @@ function irAEntrenamientoAñoDos() {
 function simularAñoDos() {
     const player = gameState.player;
 
-    const grlGeneral = calcularPromedioPonderadoPorPosicion();
+    const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
+    const { minutos, huboBreakout, huboRegresion } = calcularMinutosDelAño(modificadorSuerte);
+    player.minutesPerGame = minutos;
 
-    if (grlGeneral >= 10) {
-        player.minutesPerGame = Math.floor(Math.random() * 4) + 32;
-    } else if (grlGeneral >= 6) {
-        player.minutesPerGame = Math.floor(Math.random() * 5) + 20;
-    } else {
-        player.minutesPerGame = Math.floor(Math.random() * 5) + 8;
-    }
-
-    const calidadEquipo = sortearCalidadEquipo(); // 🆕
-    const { pts, ast, reb, stl, blk, tipoAño, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion();
+    const calidadEquipo = sortearCalidadEquipo();
+    const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
     const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo);
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
@@ -1040,7 +1103,9 @@ function simularAñoDos() {
         calidadEquipo, // 🆕
         mensajeRival, // 🆕
         logros,
-        rendimientoPer36
+        rendimientoPer36,
+        huboBreakout,      // 🆕
+        huboRegresion      // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
@@ -1073,6 +1138,7 @@ function mostrarResultadosAñoDos(res) {
         <p><strong>Contexto del año:</strong> ${res.tipoAzar}</p>
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
         ${renderizarLesionHTML(res.mensajeLesion)}
+        ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
 
         <div class="stats-grid">
@@ -1265,8 +1331,12 @@ function simularSiguienteAño() {
         }
     }
 
-    const calidadEquipo = sortearCalidadEquipo(); // 🆕
-    const { pts, ast, reb, stl, blk, tipoAño, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion();
+    const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
+    const { minutos, huboBreakout, huboRegresion } = calcularMinutosDelAño(modificadorSuerte);
+    player.minutesPerGame = minutos;
+
+    const calidadEquipo = sortearCalidadEquipo();
+    const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
     const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo);
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
@@ -1284,7 +1354,9 @@ function simularSiguienteAño() {
         calidadEquipo, // 🆕
         mensajeRival, // 🆕
         logros,
-        rendimientoPer36
+        rendimientoPer36,
+        huboBreakout,
+        huboRegresion,
     };
     gameState.statsHistory.push(resultadoAño);
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
@@ -1317,21 +1389,21 @@ function simularSiguienteAño() {
 const ENFOQUES_TEMPORADA = {
     agresivo: {
         nombre: "Modo Estrella 🌟",
-        descripcion: "Buscás protagonismo total: más tiros, más responsabilidad, más minutos de riesgo. Sube tu producción pero también el desgaste físico.",
-        pts: 1.16, ast: 1.06, reb: 1.06, stl: 1.05, blk: 1.05,
-        injuryMultiplier: 1.45
+        descripcion: "Buscás protagonismo total: más tiros, más responsabilidad, más minutos de riesgo. Sube mucho tu producción ofensiva pero descuida el resto del juego y el desgaste físico es real.",
+        pts: 1.32, ast: 0.90, reb: 0.88, stl: 0.85, blk: 0.85,
+        injuryMultiplier: 1.65
     },
     conservador: {
         nombre: "Cuidar el Cuerpo 🧊",
-        descripcion: "Jugás con el freno de mano puesto para llegar entero a fin de año. Menos números, pero el riesgo de lesión baja muchísimo.",
-        pts: 0.90, ast: 0.90, reb: 0.90, stl: 0.90, blk: 0.90,
-        injuryMultiplier: 0.55
+        descripcion: "Jugás con el freno de mano puesto para llegar entero a fin de año. Baja fuerte tu producción, pero el riesgo de lesión se reduce muchísimo.",
+        pts: 0.72, ast: 0.78, reb: 0.78, stl: 0.80, blk: 0.80,
+        injuryMultiplier: 0.40
     },
     equipo: {
         nombre: "Juego de Equipo 🤝",
-        descripcion: "Priorizás pases, rebote y defensa por sobre tu propia planilla ofensiva. Anotás menos, pero sumás mucho más en todo lo demás.",
-        pts: 0.84, ast: 1.22, reb: 1.16, stl: 1.14, blk: 1.12,
-        injuryMultiplier: 1.02
+        descripcion: "Priorizás pases, rebote y defensa por sobre tu propia planilla ofensiva. Anotás bastante menos, pero sumás mucho más en todo lo demás.",
+        pts: 0.68, ast: 1.38, reb: 1.30, stl: 1.28, blk: 1.25,
+        injuryMultiplier: 1.05
     },
     profesional: {
         nombre: "Profesional 📋",
@@ -1493,17 +1565,17 @@ function procesarLesionDeTemporada() {
 // Aplica el efecto de una lesión (si la hubo) a las stats ya calculadas de la
 // temporada, ajustando minutos temporalmente durante el cálculo y
 // restaurándolos después (la reducción de minutos es solo de ese año).
-function calcularEstadisticasConLesion() {
+function calcularEstadisticasConLesion(modificadorSuerte, tipoAño) {
     const player = gameState.player;
     const lesion = procesarLesionDeTemporada();
 
     if (!lesion) {
-        const stats = calcularEstadisticasDelAño();
+        const stats = calcularEstadisticasDelAño(modificadorSuerte, tipoAño);
         return { ...stats, mensajeLesion: null, minutosReales: player.minutesPerGame };
     }
 
     player.minutesPerGame = lesion.minutosAjustados;
-    const statsBase = calcularEstadisticasDelAño();
+    const statsBase = calcularEstadisticasDelAño(modificadorSuerte, tipoAño);
     player.minutesPerGame = lesion.minutosOriginales; // se restaura para años futuros
 
     const m = lesion.multiplicadorStat;
@@ -1771,6 +1843,7 @@ function mostrarPantallaBucleCarrera(res) {
         <p><strong>Rendimiento del año:</strong> ${res.tipoAzar}</p>
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
         ${renderizarLesionHTML(res.mensajeLesion)}
+        ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
 
         <div class="stats-grid">
