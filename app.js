@@ -2096,20 +2096,24 @@ async function mostrarLeaderboard() {
 }
 
 // ==========================================
-// 🆕 FIX: BLOQUEO DE ZOOM POR DOBLE-TAP (mobile/iOS) — versión segura
+// 🆕 FIX: BLOQUEO DE ZOOM POR DOBLE-TAP, sin frenar toques rápidos en botones
 // ==========================================
-// En vez de interceptar touchstart y re-disparar el click a mano (que podía
-// bloquear toques reales, como confirmar justo después de tocar un
-// atributo), bloqueamos directamente los eventos que iOS usa para generar
-// el zoom (gesturestart, y el doble-click sintético), sin tocar el flujo
-// normal de ningún botón.
-document.addEventListener("gesturestart", (e) => e.preventDefault());
-
+// Antes comparaba CUALQUIER toque contra el anterior en toda la pantalla,
+// así que tocar rápido el mismo botón +/- varias veces seguidas (algo común
+// al repartir muchos puntos) quedaba atrapado por error y el toque se
+// cancelaba. Ahora solo bloquea si el doble toque es sobre el MISMO
+// elemento, que es lo que realmente dispara el zoom nativo en iOS.
 let ultimoToqueGlobal = 0;
+let ultimoElementoTocado = null;
+
 document.addEventListener("touchend", (e) => {
     const ahora = Date.now();
-    if (ahora - ultimoToqueGlobal <= 150) {
+    const mismoElemento = e.target === ultimoElementoTocado;
+
+    if (ahora - ultimoToqueGlobal <= 150 && mismoElemento) {
         e.preventDefault();
     }
+
     ultimoToqueGlobal = ahora;
+    ultimoElementoTocado = e.target;
 }, { passive: false });
