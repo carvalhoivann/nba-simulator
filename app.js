@@ -2108,7 +2108,7 @@ document.addEventListener("gesturestart", (e) => e.preventDefault());
 let ultimoToqueGlobal = 0;
 document.addEventListener("touchend", (e) => {
     const ahora = Date.now();
-    if (ahora - ultimoToqueGlobal <= 180) {
+    if (ahora - ultimoToqueGlobal <= 150) {
         e.preventDefault();
     }
     ultimoToqueGlobal = ahora;
