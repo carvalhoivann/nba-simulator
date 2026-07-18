@@ -28,7 +28,8 @@ const gameState = {
         rebote: 1, tapon: 1, robo: 1,
         fuerza: 1, velocidad: 1, resistencia: 1
     },
-    statsHistory: []
+    statsHistory: [],
+    cardCollection: [] // 🆕 cartas coleccionables de cada temporada jugada
 };
 
 // Lista completa de las 30 franquicias de la NBA para el Draft aleatorio
@@ -186,6 +187,224 @@ function calcularPuntosBaseDesarrollo(experience) {
     const rol = obtenerRolActivo();
     if (rol.bonusDesarrollo) base = Math.round(base * (1 + rol.bonusDesarrollo));
     return base;
+}
+
+// ==========================================
+// 🆕 NUEVO: SONIDO Y FEEDBACK FÍSICO (Web Audio API, sin archivos)
+// ==========================================
+let audioCtx = null;
+function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+
+function reproducirTono(freq, duracion, tipoOnda = "sine", volumenInicial = 0.2, delay = 0) {
+    try {
+        const ctx = getAudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = tipoOnda;
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(volumenInicial, ctx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + duracion);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + duracion);
+    } catch (e) {
+        console.warn("No se pudo reproducir sonido:", e);
+    }
+}
+
+function sonidoSwish() {
+    reproducirTono(1200, 0.08, "sine", 0.15);
+    reproducirTono(1800, 0.12, "sine", 0.1, 0.05);
+}
+
+function sonidoBuzzer() {
+    reproducirTono(120, 0.5, "sawtooth", 0.18);
+}
+
+function sonidoLogro() {
+    reproducirTono(880, 0.1, "triangle", 0.15);
+    reproducirTono(1108, 0.1, "triangle", 0.15, 0.1);
+    reproducirTono(1318, 0.18, "triangle", 0.15, 0.2);
+}
+
+function sonidoCampeon() {
+    [523, 659, 784, 1046, 1318].forEach((freq, i) => {
+        reproducirTono(freq, 0.25, "triangle", 0.2, i * 0.12);
+    });
+}
+
+// Lanza un efecto de confetti simple en un canvas flotante, se auto-destruye solo.
+function lanzarConfetti() {
+    const canvas = document.createElement("canvas");
+    canvas.style.position = "fixed";
+    canvas.style.top = "0";
+    canvas.style.left = "0";
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "9999";
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+
+    const colores = ["#E2691B", "#D4AF37", "#35A667", "#F4F1EA", "#D6483F"];
+    const particulas = Array.from({ length: 140 }, () => ({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * canvas.height * 0.5,
+        vx: (Math.random() - 0.5) * 3,
+        vy: 2 + Math.random() * 3,
+        tam: 4 + Math.random() * 5,
+        color: colores[Math.floor(Math.random() * colores.length)],
+        rot: Math.random() * 360,
+        vrot: (Math.random() - 0.5) * 10
+    }));
+
+    let frames = 0;
+    const maxFrames = 220;
+
+    function animar() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particulas.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.rot += p.vrot;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rot * Math.PI) / 180);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.tam / 2, -p.tam / 2, p.tam, p.tam * 0.6);
+            ctx.restore();
+        });
+        frames++;
+        if (frames < maxFrames) {
+            requestAnimationFrame(animar);
+        } else {
+            canvas.remove();
+        }
+    }
+    animar();
+}
+
+// Revisa los logros/lesiones de la temporada recién jugada y dispara el
+// sonido/efecto correspondiente. Se llama desde cada pantalla de resultados.
+function reproducirFeedbackDeTemporada(res) {
+    const nombresLogros = (res.logros || []).map(l => l.nombre);
+    if (nombresLogros.includes("Campeón de la NBA 🏆")) {
+        sonidoCampeon();
+        lanzarConfetti();
+    } else if (res.logros && res.logros.length > 0) {
+        sonidoLogro();
+    }
+    if (res.mensajeLesion && res.mensajeLesion.includes("🚑")) {
+        sonidoBuzzer();
+    }
+}
+
+// ==========================================
+// 🆕 NUEVO: CARTAS COLECCIONABLES DE TEMPORADA
+// ==========================================
+const ESTILOS_RAREZA = {
+    "Común": { color: "#8B93A3", emoji: "⚪" },
+    "Rara": { color: "#35A667", emoji: "🟢" },
+    "Épica": { color: "#9B6FE8", emoji: "🟣" },
+    "Legendaria": { color: "#D4AF37", emoji: "🌟" }
+};
+
+function determinarRarezaTemporada(res) {
+    const nombresLogros = (res.logros || []).map(l => l.nombre);
+    const logrosLegendarios = ["Campeón de la NBA 🏆", "MVP de la Temporada 👑", "Finals MVP 🏅"];
+    const logrosEpicos = ["All-NBA Team ⭐", "Mejor Defensor del Año (DPOY) 🛡️", "Rookie del Año (ROY) 🏅", "Finalista de la NBA 🏀"];
+    const logrosRaros = ["Finalista de Conferencia", "Equipo Defensivo Ideal 🛡️⭐", "Sexto Hombre del Año 🎖️", "Most Improved Player 📈", "All-Rookie Team", "Clasificación a Playoffs 🎟️"];
+
+    if (nombresLogros.some(n => logrosLegendarios.includes(n)) || res.rendimientoPer36 >= 55) return "Legendaria";
+    if (nombresLogros.some(n => logrosEpicos.includes(n)) || res.rendimientoPer36 >= 42) return "Épica";
+    if (nombresLogros.some(n => logrosRaros.includes(n)) || res.rendimientoPer36 >= 28) return "Rara";
+    return "Común";
+}
+
+function generarCartaDeTemporada(res) {
+    const rareza = determinarRarezaTemporada(res);
+    const carta = {
+        year: res.year,
+        team: res.team,
+        position: gameState.player.position,
+        pts: res.pts, ast: res.ast, reb: res.reb, stl: res.stl, blk: res.blk,
+        tipoAño: res.tipoAzar,
+        rareza
+    };
+    gameState.cardCollection.push(carta);
+    return carta;
+}
+
+function renderizarCartaHTML(carta) {
+    const estilo = ESTILOS_RAREZA[carta.rareza] || ESTILOS_RAREZA["Común"];
+    return `
+        <div class="trading-card" style="--rareza-color: ${estilo.color};">
+            <div class="trading-card-header">
+                <span class="trading-card-rareza">${estilo.emoji} ${carta.rareza}</span>
+                <span class="trading-card-year">Año ${carta.year}</span>
+            </div>
+            <h4>${gameState.player.firstName} ${gameState.player.lastName}</h4>
+            <p class="trading-card-meta">${carta.position} · ${carta.team}</p>
+            <div class="trading-card-stats">
+                <span>${carta.pts} PTS</span>
+                <span>${carta.ast} AST</span>
+                <span>${carta.reb} REB</span>
+                <span>${carta.stl} STL</span>
+                <span>${carta.blk} BLK</span>
+            </div>
+            <p class="trading-card-tipo">${carta.tipoAño}</p>
+        </div>
+    `;
+}
+
+// Recuerda qué pantalla estaba visible antes de abrir la galería, para
+// poder volver exactamente a donde estabas al cerrarla.
+let pantallaAntesDeColeccion = null;
+
+function mostrarColeccionCartas() {
+    const idsPantallas = ["creation-screen", "draft-screen", "season-screen", "office-screen", "evento-screen", "retire-screen"];
+    pantallaAntesDeColeccion = idsPantallas.find(id => {
+        const el = document.getElementById(id);
+        return el && !el.classList.contains("hidden");
+    }) || null;
+
+    idsPantallas.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add("hidden");
+    });
+
+    let cardsScreen = document.getElementById("cards-screen");
+    if (!cardsScreen) {
+        cardsScreen = document.createElement("section");
+        cardsScreen.id = "cards-screen";
+        document.getElementById("game-container").appendChild(cardsScreen);
+    }
+    cardsScreen.classList.remove("hidden");
+
+    const cartasHTML = gameState.cardCollection.length > 0
+        ? gameState.cardCollection.slice().reverse().map(renderizarCartaHTML).join("")
+        : `<p class="career-no-trophies">Todavía no completaste ninguna temporada.</p>`;
+
+    cardsScreen.innerHTML = `
+        <h2>🎴 Mi Colección de Cartas</h2>
+        <div class="cards-grid">${cartasHTML}</div>
+        <button onclick="cerrarColeccionCartas()">Volver ↩️</button>
+    `;
+}
+
+function cerrarColeccionCartas() {
+    const cardsScreen = document.getElementById("cards-screen");
+    if (cardsScreen) cardsScreen.classList.add("hidden");
+    if (pantallaAntesDeColeccion) {
+        const el = document.getElementById(pantallaAntesDeColeccion);
+        if (el) el.classList.remove("hidden");
+    }
 }
 
 // ==========================================
@@ -1702,6 +1921,7 @@ function obtenerPromedioPer36Reciente() {
 // MOTOR DE SIMULACIÓN DE TEMPORADA (AÑO 1)
 // ==========================================
 async function iniciarTemporadaUno() {
+    sonidoSwish(); // 🆕
     const player = gameState.player;
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
     const calidadEquipo = await sortearCalidadEquipo();
@@ -1740,6 +1960,7 @@ async function iniciarTemporadaUno() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
+    generarCartaDeTemporada(resultadoAño); // 🆕
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     player.contractYearsLeft = Math.max(0, player.contractYearsLeft - 1);
@@ -1851,6 +2072,7 @@ function irAEntrenamientoAñoDos() {
 // MOTOR DE SIMULACIÓN: TEMPORADA (AÑO 2)
 // ==========================================
 async function simularAñoDos() {
+    sonidoSwish(); // 🆕
     const player = gameState.player;
 
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
@@ -1895,7 +2117,8 @@ async function simularAñoDos() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
-    resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
+    generarCartaDeTemporada(resultadoAño); // 🆕
+    resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     player.contractYearsLeft = Math.max(0, player.contractYearsLeft - 1);
     player.age++;
@@ -2168,6 +2391,7 @@ function confirmarEspecialidad(especialidad) {
 async function simularSiguienteAño() {
     const player = gameState.player;
     if (player.isRetired) return; // 🆕 FIX: no simular más temporadas post-retiro
+    sonidoSwish(); // 🆕
 
     player.age++;
     player.experience++;
@@ -2231,7 +2455,8 @@ async function simularSiguienteAño() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
-    resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
+    generarCartaDeTemporada(resultadoAño); // 🆕
+    resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     if (chequearRetiroDefinitivo()) {
         return;
