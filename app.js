@@ -41,6 +41,18 @@ const nbaTeams = [
     "Utah Jazz", "Washington Wizards"
 ];
 
+async function guardarPickPropioCompartido(datosPick) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const campo = `draft_${gameState.player.slotPropio}`;
+        await setDoc(refPartida, { [campo]: datosPick }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el pick de Draft compartido:", e);
+    }
+}
+
 // ==========================================
 // 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
 // ==========================================
