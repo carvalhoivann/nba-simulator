@@ -2108,7 +2108,7 @@ document.addEventListener("touchstart", (e) => {
     if (!boton) return;
 
     const ahora = Date.now();
-    if (ahora - ultimoToqueBoton <= 350) {
+    if (ahora - ultimoToqueBoton <= 220) {
         e.preventDefault();
         boton.click(); // disparamos el click a mano, ya que lo cancelamos
     }
