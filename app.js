@@ -201,7 +201,14 @@ async function simularDraft() {
         pickAleatorio = Math.floor(Math.random() * 60) + 1;
     } while (pickAleatorio === pickOcupadoPorRival);
 
-    const equipoAleatorio = nbaTeams[Math.floor(Math.random() * nbaTeams.length)];
+    let equiposDisponiblesDraft = nbaTeams;
+    if (tieneCarreraCompartida()) {
+        const draftRivalParaEquipo = await obtenerPickDelRivalCompartido();
+        if (draftRivalParaEquipo && draftRivalParaEquipo.equipo) {
+            equiposDisponiblesDraft = nbaTeams.filter(t => t !== draftRivalParaEquipo.equipo);
+        }
+    }
+    const equipoAleatorio = equiposDisponiblesDraft[Math.floor(Math.random() * equiposDisponiblesDraft.length)];
 
     gameState.player.currentTeam = equipoAleatorio;
     gameState.player.contractYearsLeft = 2;
@@ -976,26 +983,110 @@ function renderizarRivalHistoricoHTML(mensaje) {
 }
 
 // ==========================================
-// SISTEMA DE PREMIOS Y LOGROS DE TEMPORADA
+// 🆕 NUEVO: CANDIDATURAS A PREMIOS INDIVIDUALES (para modo compartido)
 // ==========================================
-function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo, calidadEquipo) {
+// En carrera compartida, premios como MVP o DPOY no pueden repetirse entre
+// los dos jugadores. Esta función tira los mismos dados que antes, pero en
+// vez de otorgar el premio directamente, marca si el jugador ES CANDIDATO
+// (pasó el check de azar) y guarda el puntaje para comparar después contra
+// el compañero. El que tenga mejor puntaje entre los candidatos se lo lleva.
+function calcularCandidaturasPremios(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo) {
     const player = gameState.player;
-    // 🆕 rendimientoIndividual: decide premios personales (MVP, All-NBA, ROY,
-    // MIP, 6MOY). rendimiento: versión ajustada por el contexto del equipo,
-    // usada SOLO para la cadena de playoffs/conferencia/finales/anillo, para
-    // que el equipo pese en llegar lejos sin inflar ni desinflar tus premios
-    // individuales.
     const rendimientoIndividual = pts + ast + reb + (impactoDefensivo * 15);
-    const bonusEquipo = calidadEquipo ? calidadEquipo.bonusRendimiento : 0;
-    const rendimiento = Math.max(0, rendimientoIndividual + bonusEquipo);
-    // 🆕 MEJORA: rendimiento defensivo específico (para DPOY y Equipo
-    // Defensivo Ideal), combinando robos y tapones reales de la planilla con
-    // el impacto defensivo general, en vez de depender solo de este último.
     const rendimientoDefensivo = (stl * 8) + (blk * 8) + (impactoDefensivo * 25);
     const esRookie = yearNumero === 1;
     const historialPrevio = gameState.statsHistory.length > 0
         ? gameState.statsHistory[gameState.statsHistory.length - 1]
         : null;
+
+    const candidaturas = {
+        mvp: false, allNba: false, roy: false, allRookie: false,
+        sextoHombre: false, mip: false, dpoy: false, allDefensive: false
+    };
+
+    if (!esRookie && rendimientoIndividual >= 48) {
+        const probMVP = Math.min(0.40, (rendimientoIndividual - 45) / 20);
+        if (Math.random() < probMVP) {
+            candidaturas.mvp = true;
+        } else if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
+            candidaturas.allNba = true;
+        }
+    } else if (!esRookie && rendimientoIndividual >= 35) {
+        if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
+            candidaturas.allNba = true;
+        }
+    }
+
+    if (!esRookie && player.minutesPerGame < 20 && rendimientoIndividual >= 15) {
+        if (Math.random() < 0.30) candidaturas.sextoHombre = true;
+    }
+
+    if (!esRookie && historialPrevio) {
+        const rendimientoPrevio = historialPrevio.pts + historialPrevio.ast + historialPrevio.reb;
+        const huboSaltoGrande = rendimientoPrevio > 0 && rendimientoIndividual >= rendimientoPrevio * 1.35;
+        if (huboSaltoGrande && rendimientoIndividual >= 15 && Math.random() < 0.40) {
+            candidaturas.mip = true;
+        }
+    }
+
+    if (esRookie) {
+        if (rendimientoIndividual >= 20 && Math.random() < 0.35) {
+            candidaturas.roy = true;
+        } else if (rendimientoIndividual >= 10 && Math.random() < 0.30) {
+            candidaturas.allRookie = true;
+        }
+    }
+
+    if (!esRookie && rendimientoDefensivo >= 18) {
+        const probDPOY = Math.min(0.35, (rendimientoDefensivo - 16) * 0.028);
+        if (Math.random() < probDPOY) candidaturas.dpoy = true;
+    }
+
+    if (!esRookie && rendimientoDefensivo >= 11) {
+        const probAllDef = Math.min(0.50, (rendimientoDefensivo - 9) * 0.045);
+        if (Math.random() < probAllDef) candidaturas.allDefensive = true;
+    }
+
+    return { candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie };
+}
+
+// ==========================================
+// 🆕 NUEVO: RESOLUCIÓN DE CAMPEÓN ÚNICO (modo compartido)
+// ==========================================
+// Si ambos jugadores llegaron a "Campeón de la NBA" en su propia cadena de
+// playoffs esa temporada, solo uno se queda con el título real de la liga.
+// Gana el de mayor rendimiento individual; el otro pasa a Finalista.
+function resolverCampeonUnico(logrosPropios, rendimientoIndividualPropio, datosRival) {
+    const yoSoyCampeon = logrosPropios.some(l => l.nombre === "Campeón de la NBA 🏆");
+    if (!yoSoyCampeon || !datosRival || !datosRival.esCampeonEstaTemporada) {
+        return logrosPropios; // no hay conflicto, nada que resolver
+    }
+
+    const rendimientoRival = datosRival.rendimientoIndividual || 0;
+    if (rendimientoIndividualPropio >= rendimientoRival) {
+        return logrosPropios; // ganás el desempate, te quedás con el título
+    }
+
+    // Perdiste el desempate: bajás a Finalista de la NBA
+    return logrosPropios.map(l => {
+        if (l.nombre === "Campeón de la NBA 🏆") {
+            return { nombre: "Finalista de la NBA 🏀", puntos: 1 };
+        }
+        if (l.nombre === "Finals MVP 🏅") {
+            return null; // si no sos campeón, tampoco podés ser Finals MVP
+        }
+        return l;
+    }).filter(Boolean);
+}
+
+// ==========================================
+// SISTEMA DE PREMIOS Y LOGROS DE TEMPORADA
+// ==========================================
+function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo, calidadEquipo, modoCompartido = false) {
+    const player = gameState.player;
+    const rendimientoIndividual = pts + ast + reb + (impactoDefensivo * 15);
+    const bonusEquipo = calidadEquipo ? calidadEquipo.bonusRendimiento : 0;
+    const rendimiento = Math.max(0, rendimientoIndividual + bonusEquipo);
 
     const logros = [];
     let bonus = 0;
@@ -1005,6 +1096,8 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
         bonus += puntos;
     };
 
+    // ---- Premios de EQUIPO: no compiten entre los dos jugadores, cada uno
+    // tiene su propia franquicia, así que se mantienen como antes. ----
     let probPlayoffs;
     if (rendimiento >= 45) probPlayoffs = 0.80;
     else if (rendimiento >= 28) probPlayoffs = 0.55;
@@ -1035,64 +1128,23 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
         }
     }
 
-    if (!esRookie && rendimientoIndividual >= 48) {
-        const probMVP = Math.min(0.40, (rendimientoIndividual - 45) / 20);
-        if (Math.random() < probMVP) {
-            agregarLogro("MVP de la Temporada 👑", 3);
-        } else if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
-            agregarLogro("All-NBA Team ⭐", 2);
-        }
-    } else if (!esRookie && rendimientoIndividual >= 35) {
-        if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
-            agregarLogro("All-NBA Team ⭐", 2);
-        }
+    // ---- Premios INDIVIDUALES: en modo SOLO se otorgan directo (como
+    // siempre). En modo COMPARTIDO se calculan como candidaturas y se
+    // resuelven después en la ceremonia (ver resolverPremiosCompartidos). ----
+    const { candidaturas, rendimientoDefensivo, esRookie } = calcularCandidaturasPremios(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo);
+
+    if (!modoCompartido) {
+        if (candidaturas.mvp) agregarLogro("MVP de la Temporada 👑", 3);
+        else if (candidaturas.allNba) agregarLogro("All-NBA Team ⭐", 2);
+        if (candidaturas.sextoHombre) agregarLogro("Sexto Hombre del Año 🎖️", 2);
+        if (candidaturas.mip) agregarLogro("Most Improved Player 📈", 2);
+        if (candidaturas.roy) agregarLogro("Rookie del Año (ROY) 🏅", 2);
+        else if (candidaturas.allRookie) agregarLogro("All-Rookie Team", 1);
+        if (candidaturas.dpoy) agregarLogro("Mejor Defensor del Año (DPOY) 🛡️", 3);
+        if (candidaturas.allDefensive) agregarLogro("Equipo Defensivo Ideal 🛡️⭐", 2);
     }
 
-    if (!esRookie && player.minutesPerGame < 20 && rendimientoIndividual >= 15) {
-        if (Math.random() < 0.30) {
-            agregarLogro("Sexto Hombre del Año 🎖️", 1);
-        }
-    }
-
-    if (!esRookie && historialPrevio) {
-        const rendimientoPrevio = historialPrevio.pts + historialPrevio.ast + historialPrevio.reb;
-        const huboSaltoGrande = rendimientoPrevio > 0 && rendimientoIndividual >= rendimientoPrevio * 1.35;
-        if (huboSaltoGrande && rendimientoIndividual >= 15 && Math.random() < 0.40) {
-            agregarLogro("Most Improved Player 📈", 1);
-        }
-    }
-
-    if (esRookie) {
-        if (rendimientoIndividual >= 20 && Math.random() < 0.35) {
-            agregarLogro("Rookie del Año (ROY) 🏅", 2);
-        } else if (rendimientoIndividual >= 10 && Math.random() < 0.30) {
-            agregarLogro("All-Rookie Team", 1);
-        }
-    }
-
-    // 🆕 MEJORA: premio a Mejor Defensor del Año, ahora basado en robos y
-    // tapones reales de la temporada (no solo un número interno), para que
-    // sea consistente con lo que se ve en la planilla de stats.
-    if (!esRookie && rendimientoDefensivo >= 18) {
-        const probDPOY = Math.min(0.35, (rendimientoDefensivo - 16) * 0.028);
-        if (Math.random() < probDPOY) {
-            agregarLogro("Mejor Defensor del Año (DPOY) 🛡️", 2);
-        }
-    }
-
-    // 🆕 MEJORA: Equipo Defensivo Ideal, el equivalente defensivo del All-NBA
-    // Team. Antes construir un defensor de elite (robos/tapones) no te daba
-    // ningún reconocimiento propio más allá del DPOY (que es un solo cupo
-    // simbólico); ahora hay un premio más alcanzable para builds defensivas
-    // consistentes, no solo para la temporada perfecta.
-    if (!esRookie && rendimientoDefensivo >= 11) {
-        const probAllDef = Math.min(0.50, (rendimientoDefensivo - 9) * 0.045);
-        if (Math.random() < probAllDef) {
-            agregarLogro("Equipo Defensivo Ideal 🛡️⭐", 1);
-        }
-    }
-
-    return { logros, bonus };
+    return { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie };
 }
 
 // 🆕 NUEVO: caja de aviso cuando hubo una lesión en la temporada.
@@ -1137,7 +1189,7 @@ function iniciarTemporadaUno() {
     const calidadEquipo = sortearCalidadEquipo();
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
 
-    const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo);
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -1154,7 +1206,13 @@ function iniciarTemporadaUno() {
         calidadEquipo, // 🆕
         mensajeRival, // 🆕
         logros,
-        rendimientoPer36
+        rendimientoPer36,
+        logros,
+        rendimientoPer36,
+        candidaturas,          // 🆕
+        rendimientoIndividual, // 🆕
+        rendimientoDefensivo,  // 🆕
+        esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
@@ -1272,7 +1330,7 @@ function simularAñoDos() {
 
     const calidadEquipo = sortearCalidadEquipo();
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
-    const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo);
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -1291,7 +1349,13 @@ function simularAñoDos() {
         logros,
         rendimientoPer36,
         huboBreakout,      // 🆕
-        huboRegresion      // 🆕
+        huboRegresion,      // 🆕
+        logros,
+        rendimientoPer36,
+        candidaturas,          // 🆕
+        rendimientoIndividual, // 🆕
+        rendimientoDefensivo,  // 🆕
+        esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
@@ -1534,7 +1598,7 @@ function simularSiguienteAño() {
 
     const calidadEquipo = sortearCalidadEquipo();
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
-    const { logros, bonus } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo);
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -1554,6 +1618,12 @@ function simularSiguienteAño() {
         rendimientoPer36,
         huboBreakout,
         huboRegresion,
+        logros,
+        rendimientoPer36,
+        candidaturas,          // 🆕
+        rendimientoIndividual, // 🆕
+        rendimientoDefensivo,  // 🆕
+        esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕
@@ -1710,7 +1780,7 @@ function seleccionarEnfoque(key) {
     gameState.player.enfoqueTemporada = key;
 
     document.querySelectorAll(".enfoque-card").forEach(el => el.classList.remove("enfoque-card-activa"));
-    const cardIndex = Object.keys(ENFOQUES_TEMPORADA).indexOf(key);
+    const cardIndex = gameState.player.enfoquesDisponiblesTemporada.indexOf(key);
     const cards = document.querySelectorAll(".enfoque-card");
     if (cards[cardIndex]) cards[cardIndex].classList.add("enfoque-card-activa");
 
@@ -1928,20 +1998,31 @@ function procesarEventoDeTemporada() {
 function manejarEventoYFinalizar(resultadoAño, aplicarPuntosFinal, mostrarFn) {
     const evento = procesarEventoDeTemporada();
 
+    const finalizarFlujo = (extraDelEvento) => {
+        if (tieneCarreraCompartida()) {
+            guardarResultadoParaCeremonia(resultadoAño);
+            mostrarPantallaEsperandoRival(resultadoAño, (resultadoFinal, bonusCeremonia) => {
+                aplicarPuntosFinal((extraDelEvento || 0) + bonusCeremonia);
+                setTimeout(() => mostrarFn(resultadoFinal), 3000);
+            });
+        } else {
+            aplicarPuntosFinal(extraDelEvento || 0);
+            mostrarFn(resultadoAño);
+        }
+    };
+
     if (!evento) {
-        aplicarPuntosFinal(0);
-        mostrarFn(resultadoAño);
+        finalizarFlujo(0);
         return;
     }
 
     if (evento.tipo === "automatico") {
         resultadoAño.mensajeEvento = evento.mensaje;
-        aplicarPuntosFinal(evento.bonusExtra);
-        mostrarFn(resultadoAño);
+        finalizarFlujo(evento.bonusExtra);
         return;
     }
 
-    mostrarPantallaEventoDecision(evento, resultadoAño, aplicarPuntosFinal, mostrarFn);
+    mostrarPantallaEventoDecision(evento, resultadoAño, (bonusExtra) => finalizarFlujo(bonusExtra), () => {});
 }
 
 // ==========================================
@@ -2497,4 +2578,158 @@ async function sincronizarCarreraCompartida() {
     if (contenedor) {
         contenedor.outerHTML = renderizarProgresoRivalCompartidoHTML(datosRival);
     }
+}
+
+// ==========================================
+// 🆕 NUEVO: CEREMONIA ANUAL COMPARTIDA
+// ==========================================
+// Cuando hay carrera compartida, en vez de mostrar los resultados de la
+// temporada apenas termina, cada jugador guarda su resultadoAño en Firestore
+// bajo una clave por año (ceremonia_year_N) y espera a que el otro también
+// termine ESE MISMO año. Recién ahí se resuelven los premios individuales
+// (que no pueden repetirse) y se muestran los resultados de ambos juntos.
+
+async function guardarResultadoParaCeremonia(resultadoAño) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const campo = `ceremonia_year${resultadoAño.year}_${gameState.player.slotPropio}`;
+        await setDoc(refPartida, {
+            [campo]: {
+                ...resultadoAño,
+                nombreJugador: `${gameState.player.firstName} ${gameState.player.lastName}`
+            }
+        }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el resultado para la ceremonia:", e);
+    }
+}
+
+async function obtenerResultadoRivalCeremonia(year) {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
+        const campo = `ceremonia_year${year}_${slotRival}`;
+        return snap.data()[campo] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el resultado del rival para la ceremonia:", e);
+        return null;
+    }
+}
+
+// Compara candidaturas propias contra las del rival y resuelve quién gana
+// cada premio individual (el de mayor rendimiento se lo lleva).
+function resolverPremiosCompartidos(resultadoPropio, resultadoRival) {
+    const logrosFinales = resultadoPropio.logros.filter(l =>
+        !["MVP de la Temporada 👑", "All-NBA Team ⭐", "Sexto Hombre del Año 🎖️",
+          "Most Improved Player 📈", "Rookie del Año (ROY) 🏅", "All-Rookie Team",
+          "Mejor Defensor del Año (DPOY) 🛡️", "Equipo Defensivo Ideal 🛡️⭐"].includes(l.nombre)
+    );
+
+    const cand = resultadoPropio.candidaturas || {};
+    const candRival = resultadoRival ? (resultadoRival.candidaturas || {}) : {};
+    const miRend = resultadoPropio.rendimientoIndividual || 0;
+    const rendRival = resultadoRival ? (resultadoRival.rendimientoIndividual || 0) : -1;
+    const miRendDef = resultadoPropio.rendimientoDefensivo || 0;
+    const rendDefRival = resultadoRival ? (resultadoRival.rendimientoDefensivo || 0) : -1;
+
+    const ganoYo = (miCandidato, rivalCandidato, miValor, rivalValor) => {
+        if (miCandidato && (!rivalCandidato || miValor >= rivalValor)) return true;
+        return false;
+    };
+
+    if (ganoYo(cand.mvp, candRival.mvp, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "MVP de la Temporada 👑", puntos: 3 });
+    } else if (ganoYo(cand.allNba, candRival.allNba, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "All-NBA Team ⭐", puntos: 2 });
+    }
+
+    if (ganoYo(cand.sextoHombre, candRival.sextoHombre, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "Sexto Hombre del Año 🎖️", puntos: 2 });
+    }
+    if (ganoYo(cand.mip, candRival.mip, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "Most Improved Player 📈", puntos: 2 });
+    }
+    if (ganoYo(cand.roy, candRival.roy, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "Rookie del Año (ROY) 🏅", puntos: 2 });
+    } else if (ganoYo(cand.allRookie, candRival.allRookie, miRend, rendRival)) {
+        logrosFinales.push({ nombre: "All-Rookie Team", puntos: 1 });
+    }
+    if (ganoYo(cand.dpoy, candRival.dpoy, miRendDef, rendDefRival)) {
+        logrosFinales.push({ nombre: "Mejor Defensor del Año (DPOY) 🛡️", puntos: 3 });
+    }
+    if (ganoYo(cand.allDefensive, candRival.allDefensive, miRendDef, rendDefRival)) {
+        logrosFinales.push({ nombre: "Equipo Defensivo Ideal 🛡️⭐", puntos: 2 });
+    }
+
+    const datosRivalParaCampeon = resultadoRival ? {
+        esCampeonEstaTemporada: resultadoRival.logros.some(l => l.nombre === "Campeón de la NBA 🏆"),
+        rendimientoIndividual: rendRival
+    } : null;
+    const logrosConCampeonResuelto = resolverCampeonUnico(logrosFinales, miRend, datosRivalParaCampeon);
+
+    const bonusFinal = logrosConCampeonResuelto.reduce((acc, l) => acc + l.puntos, 0);
+    return { logros: logrosConCampeonResuelto, bonus: bonusFinal };
+}
+
+let intervaloEsperaCeremonia = null;
+
+function mostrarPantallaEsperandoRival(resultadoAño, continuarConMostrarFn) {
+    ["creation-screen", "draft-screen", "season-screen", "office-screen", "evento-screen"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add("hidden");
+    });
+
+    let esperaScreen = document.getElementById("espera-screen");
+    if (!esperaScreen) {
+        esperaScreen = document.createElement("section");
+        esperaScreen.id = "espera-screen";
+        document.getElementById("game-container").appendChild(esperaScreen);
+    }
+    esperaScreen.classList.remove("hidden");
+    esperaScreen.innerHTML = `
+        ${renderizarTarjetaJugador()}
+        <h2>🏆 Ceremonia de Premios — Año ${resultadoAño.year}</h2>
+        <div class="status-box alert-equipo">
+            <p>⏳ Ya terminaste tu temporada. Esperando a que tu compañero de partida termine la suya para entregar los premios juntos...</p>
+        </div>
+    `;
+
+    if (intervaloEsperaCeremonia) clearInterval(intervaloEsperaCeremonia);
+
+    intervaloEsperaCeremonia = setInterval(async () => {
+        const resultadoRival = await obtenerResultadoRivalCeremonia(resultadoAño.year);
+        if (!resultadoRival) return; // sigue esperando
+
+        clearInterval(intervaloEsperaCeremonia);
+        intervaloEsperaCeremonia = null;
+
+        const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, resultadoRival);
+        resultadoAño.logros = logros;
+
+        mostrarPantallaCeremoniaConjunta(resultadoAño, resultadoRival);
+        continuarConMostrarFn(resultadoAño, bonus);
+    }, 4000);
+}
+
+function mostrarPantallaCeremoniaConjunta(resultadoPropio, resultadoRival) {
+    let esperaScreen = document.getElementById("espera-screen");
+    if (!esperaScreen) return;
+
+    const items = resultadoPropio.logros.map(l => `<li>${l.nombre} <strong>(+${l.puntos})</strong></li>`).join("");
+
+    esperaScreen.innerHTML = `
+        <h2>🏆 Ceremonia de Premios — Año ${resultadoPropio.year}</h2>
+        <div class="status-box alert-equipo">
+            <p><strong>Vos:</strong> ${resultadoPropio.pts} PTS / ${resultadoPropio.ast} AST / ${resultadoPropio.reb} REB — ${resultadoPropio.team}</p>
+            <p><strong>${resultadoRival.nombreJugador}:</strong> ${resultadoRival.pts} PTS / ${resultadoRival.ast} AST / ${resultadoRival.reb} REB — ${resultadoRival.team}</p>
+        </div>
+        ${renderizarLogrosHTML(resultadoPropio.logros)}
+        <p style="text-align:center; opacity:0.7;">Continuando en unos segundos...</p>
+    `;
 }
