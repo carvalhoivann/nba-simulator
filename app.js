@@ -3835,9 +3835,23 @@ async function guardarResultadoParaCeremonia(resultadoAño) {
         const { db, doc, setDoc } = window.firestoreDB;
         const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
         const campo = `ceremonia_year${resultadoAño.year}_${gameState.player.slotPropio}`;
+
+        // 🆕 FIX: resultadoObjetivo.objetivo trae una función (chequear) que
+        // Firestore no puede serializar. Eso hacía fallar el setDoc entero
+        // (en silencio, por el catch de abajo) y los dos jugadores quedaban
+        // esperándose para siempre porque el documento nunca se escribía.
+        const resultadoParaGuardar = { ...resultadoAño };
+        if (resultadoParaGuardar.resultadoObjetivo && resultadoParaGuardar.resultadoObjetivo.objetivo) {
+            const { id, texto, puntos } = resultadoParaGuardar.resultadoObjetivo.objetivo;
+            resultadoParaGuardar.resultadoObjetivo = {
+                cumplido: resultadoParaGuardar.resultadoObjetivo.cumplido,
+                objetivo: { id, texto, puntos } // solo datos planos, sin la función chequear
+            };
+        }
+
         await setDoc(refPartida, {
             [campo]: {
-                ...resultadoAño,
+                ...resultadoParaGuardar,
                 nombreJugador: `${gameState.player.firstName} ${gameState.player.lastName}`
             }
         }, { merge: true });
