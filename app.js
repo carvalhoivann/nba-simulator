@@ -32,6 +32,16 @@ const gameState = {
     cardCollection: [] // 🆕 cartas coleccionables de cada temporada jugada
 };
 
+// 🆕 SEGURIDAD: escapa cualquier texto antes de insertarlo en innerHTML.
+// Necesario porque en Carrera Compartida el nombre/apellido de OTRO jugador
+// (texto libre, viene de Firestore) se muestra en tu pantalla. Sin esto,
+// alguien podría poner HTML/JS como "nombre" y ejecutarlo en tu navegador.
+function escaparHTML(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+}
+
 // Lista completa de las 30 franquicias de la NBA para el Draft aleatorio
 const nbaTeams = [
     "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets",
@@ -312,29 +322,77 @@ const ESTILOS_RAREZA = {
     "Común": { color: "#8B93A3", emoji: "⚪" },
     "Rara": { color: "#35A667", emoji: "🟢" },
     "Épica": { color: "#9B6FE8", emoji: "🟣" },
-    "Legendaria": { color: "#D4AF37", emoji: "🌟" }
+    "Legendaria": { color: "#D4AF37", emoji: "🌟" },
+    "Mítica": { color: "#E24AA8", emoji: "💠" }
 };
 
+// 🆕 MEJORA: la rareza ahora se basa en tu nivel de juego PERSONAL
+// (rendimientoPer36) y en logros INDIVIDUALES (premios que solo dependen de
+// vos). Se sacaron los logros de EQUIPO (Playoffs, Finalista de Conferencia)
+// de la lista, porque dependen mucho del roster que te tocó ese año y
+// generaban cartas "Rara" en temporadas personales flojas solo porque el
+// equipo tuvo un buen año. Los umbrales numéricos también subieron un poco.
 function determinarRarezaTemporada(res) {
     const nombresLogros = (res.logros || []).map(l => l.nombre);
-    const logrosLegendarios = ["Campeón de la NBA 🏆", "MVP de la Temporada 👑", "Finals MVP 🏅"];
-    const logrosEpicos = ["All-NBA Team ⭐", "Mejor Defensor del Año (DPOY) 🛡️", "Rookie del Año (ROY) 🏅", "Finalista de la NBA 🏀"];
-    const logrosRaros = ["Finalista de Conferencia", "Equipo Defensivo Ideal 🛡️⭐", "Sexto Hombre del Año 🎖️", "Most Improved Player 📈", "All-Rookie Team", "Clasificación a Playoffs 🎟️"];
 
-    if (nombresLogros.some(n => logrosLegendarios.includes(n)) || res.rendimientoPer36 >= 55) return "Legendaria";
-    if (nombresLogros.some(n => logrosEpicos.includes(n)) || res.rendimientoPer36 >= 42) return "Épica";
-    if (nombresLogros.some(n => logrosRaros.includes(n)) || res.rendimientoPer36 >= 28) return "Rara";
+    const logrosMiticos = ["Campeón de la NBA 🏆", "Finals MVP 🏅"];
+    const logrosLegendarios = ["MVP de la Temporada 👑", "Mejor Defensor del Año (DPOY) 🛡️"];
+    const logrosEpicos = ["All-NBA Team ⭐", "Rookie del Año (ROY) 🏅", "Equipo Defensivo Ideal 🛡️⭐", "Most Improved Player 📈"];
+    const logrosRaros = ["Sexto Hombre del Año 🎖️", "All-Rookie Team"];
+
+    const tieneMitico = nombresLogros.some(n => logrosMiticos.includes(n));
+    const tieneLegendario = nombresLogros.some(n => logrosLegendarios.includes(n));
+    const tieneEpico = nombresLogros.some(n => logrosEpicos.includes(n));
+    const tieneRaro = nombresLogros.some(n => logrosRaros.includes(n));
+
+    if ((tieneMitico && tieneLegendario) || res.rendimientoPer36 >= 65) return "Mítica";
+    if (tieneMitico || tieneLegendario || res.rendimientoPer36 >= 50) return "Legendaria";
+    if (tieneEpico || res.rendimientoPer36 >= 36) return "Épica";
+    if (tieneRaro || res.rendimientoPer36 >= 24) return "Rara";
     return "Común";
+}
+
+// 🆕 NUEVO: "tipo" de carta — una etiqueta temática independiente de la
+// rareza, según el perfil estadístico de la temporada. Le da sabor a la
+// colección (dos cartas "Rara" pueden ser muy distintas entre sí) y de paso
+// le pone un nombre honesto a las temporadas flojas o golpeadas por
+// lesiones, en vez de simplemente no destacar nada.
+function determinarTipoCarta(res) {
+    if (res.mensajeLesion && res.rendimientoPer36 < 20) return "Temporada Golpeada 🩹";
+    if (res.huboBreakout) return "El Salto 📈";
+    if (res.rendimientoPer36 < 14) return "Año de Transición 📋";
+
+    const pts = res.pts, ast = res.ast, reb = res.reb, def = (res.stl || 0) + (res.blk || 0);
+    // Normalizamos cada stat a una escala comparable (0 a ~1) usando techos
+    // realistas, para poder comparar "peras con peras" cuál domina.
+    const nPts = pts / 32, nAst = ast / 11, nReb = reb / 12, nDef = def / 4;
+    const valores = [
+        { tipo: "Anotador Puro 🎯", valor: nPts },
+        { tipo: "Armador de Elite 🧠", valor: nAst },
+        { tipo: "Máquina de Rebotes 🧱", valor: nReb },
+        { tipo: "Muralla Defensiva 🛡️", valor: nDef }
+    ];
+    valores.sort((a, b) => b.valor - a.valor);
+
+    const dominante = valores[0];
+    const segundo = valores[1];
+
+    // Si no hay una stat que sobresalga claramente por sobre las demás, es
+    // una temporada pareja en todos los rubros.
+    if (dominante.valor - segundo.valor < 0.12) return "Todoterreno 🌀";
+    return dominante.tipo;
 }
 
 function generarCartaDeTemporada(res) {
     const rareza = determinarRarezaTemporada(res);
+    const tipoCarta = determinarTipoCarta(res); // 🆕
     const carta = {
         year: res.year,
         team: res.team,
         position: gameState.player.position,
         pts: res.pts, ast: res.ast, reb: res.reb, stl: res.stl, blk: res.blk,
         tipoAño: res.tipoAzar,
+        tipoCarta, // 🆕
         rareza
     };
     gameState.cardCollection.push(carta);
@@ -349,8 +407,9 @@ function renderizarCartaHTML(carta) {
                 <span class="trading-card-rareza">${estilo.emoji} ${carta.rareza}</span>
                 <span class="trading-card-year">Año ${carta.year}</span>
             </div>
-            <h4>${gameState.player.firstName} ${gameState.player.lastName}</h4>
+            <h4>${escaparHTML(gameState.player.firstName)} ${escaparHTML(gameState.player.lastName)}</h4>
             <p class="trading-card-meta">${carta.position} · ${carta.team}</p>
+            ${carta.tipoCarta ? `<p class="trading-card-tipo" style="color: var(--rareza-color); font-weight: 600;">${carta.tipoCarta}</p>` : ""}
             <div class="trading-card-stats">
                 <span>${carta.pts} PTS</span>
                 <span>${carta.ast} AST</span>
@@ -369,9 +428,14 @@ let pantallaAntesDeColeccion = null;
 
 function mostrarColeccionCartas() {
     const idsPantallas = ["creation-screen", "draft-screen", "season-screen", "office-screen", "evento-screen", "retire-screen"];
+    // 🆕 FIX: antes solo miraba la clase "hidden", pero creation-screen se
+    // oculta con estilo inline (display:none) en vez de esa clase, así que
+    // siempre se detectaba como "visible" por error, sin importar en qué
+    // pantalla estuvieras realmente. Ahora se chequea la visibilidad REAL
+    // en pantalla (offsetParent), que funciona sin importar cómo se ocultó.
     pantallaAntesDeColeccion = idsPantallas.find(id => {
         const el = document.getElementById(id);
-        return el && !el.classList.contains("hidden");
+        return el && el.offsetParent !== null;
     }) || null;
 
     idsPantallas.forEach(id => {
@@ -403,7 +467,10 @@ function cerrarColeccionCartas() {
     if (cardsScreen) cardsScreen.classList.add("hidden");
     if (pantallaAntesDeColeccion) {
         const el = document.getElementById(pantallaAntesDeColeccion);
-        if (el) el.classList.remove("hidden");
+        if (el) {
+            el.classList.remove("hidden");
+            el.style.display = ""; // 🆕 por si estaba oculta con estilo inline (ej: creation-screen)
+        }
     }
 }
 
@@ -1094,7 +1161,7 @@ function renderizarTarjetaJugador() {
     return `
         <div class="player-card">
             <div>
-                <p class="player-card-name">${player.firstName} ${player.lastName}</p>
+                <p class="player-card-name">${escaparHTML(player.firstName)} ${escaparHTML(player.lastName)}</p>
                 <p class="player-card-meta">${player.position || "Sin posición"} · ${player.currentTeam} · ${obtenerRolActivo().nombre}${player.climaVestuario >= 80 ? " · 🔥 Líder del vestuario" : player.climaVestuario <= 30 ? " · ⚠️ Tensión en el vestuario" : ""}</p>
                 <div class="player-card-details">
                     <span>Edad: <strong>${player.age}</strong></span>
@@ -1566,11 +1633,16 @@ function mostrarComparativaFinalCarreras(resumenPropio, resumenRival) {
         <div class="stat-box"><p>${etiqueta} (rival)</p><h3>${valorB}</h3></div>
     `;
 
+    const nombrePropioSeguro = escaparHTML(`${resumenPropio.firstName} ${resumenPropio.lastName}`);
+    const nombreRivalSeguro = escaparHTML(`${resumenRival.firstName} ${resumenRival.lastName}`);
+    const soloNombrePropioSeguro = escaparHTML(resumenPropio.firstName);
+    const soloNombreRivalSeguro = escaparHTML(resumenRival.firstName);
+
     esperaScreen.innerHTML = `
         <h2>🏆 Comparativa Final de Carreras</h2>
         <div class="status-box alert-equipo">
-            <p><strong>${resumenPropio.firstName} ${resumenPropio.lastName}</strong> (${resumenPropio.position}) — ${resumenPropio.seasons} temporadas — <strong>${resumenPropio.tier}</strong> (${resumenPropio.puntajeLegado} pts de legado)</p>
-            <p><strong>${resumenRival.firstName} ${resumenRival.lastName}</strong> (${resumenRival.position}) — ${resumenRival.seasons} temporadas — <strong>${resumenRival.tier}</strong> (${resumenRival.puntajeLegado} pts de legado)</p>
+            <p><strong>${nombrePropioSeguro}</strong> (${escaparHTML(resumenPropio.position)}) — ${resumenPropio.seasons} temporadas — <strong>${resumenPropio.tier}</strong> (${resumenPropio.puntajeLegado} pts de legado)</p>
+            <p><strong>${nombreRivalSeguro}</strong> (${escaparHTML(resumenRival.position)}) — ${resumenRival.seasons} temporadas — <strong>${resumenRival.tier}</strong> (${resumenRival.puntajeLegado} pts de legado)</p>
         </div>
         <div class="stats-grid">
             ${filaComparativa("PTS", resumenPropio.promedioPts, resumenRival.promedioPts)}
@@ -1581,7 +1653,7 @@ function mostrarComparativaFinalCarreras(resumenPropio, resumenRival) {
         </div>
         <div class="status-box hof-box">
             <p class="hof-label">Veredicto Final</p>
-            <h3 class="hof-tier">${resumenPropio.puntajeLegado >= resumenRival.puntajeLegado ? `${resumenPropio.firstName} se lleva la gloria 🐐` : `${resumenRival.firstName} se lleva la gloria 🐐`}</h3>
+            <h3 class="hof-tier">${resumenPropio.puntajeLegado >= resumenRival.puntajeLegado ? `${soloNombrePropioSeguro} se lleva la gloria 🐐` : `${soloNombreRivalSeguro} se lleva la gloria 🐐`}</h3>
         </div>
         <button onclick="location.reload()">Crear un nuevo Personaje 🔄</button>
     `;
@@ -1958,7 +2030,6 @@ async function iniciarTemporadaUno() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
-    generarCartaDeTemporada(resultadoAño); // 🆕
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     player.contractYearsLeft = Math.max(0, player.contractYearsLeft - 1);
@@ -1981,6 +2052,7 @@ async function iniciarTemporadaUno() {
 // INTERFAZ: PANTALLA DE ESTADÍSTICAS FINALES (AÑO 1)
 // ==========================================
 function mostrarResultadosTemporada(res) {
+    generarCartaDeTemporada(res); // 🆕 movido acá: en modo compartido, res.logros ya viene con los premios resueltos
     document.getElementById("draft-screen").classList.add("hidden");
 
     let seasonScreen = document.getElementById("season-screen");
@@ -2032,7 +2104,7 @@ function irAEntrenamientoAñoDos() {
     gameState.player.enfoqueTemporada = null;
     gameState.player.enfoquesDisponiblesTemporada = null; // 🆕 vuelve a sortear opciones nuevas
     gameState.player.minutosAlArrancarTemporada = gameState.player.minutesPerGame;
-    gameState.player.objetivoTemporadaActivo = sortearObjetivoDeTemporada(gameState.player.experience === 1);
+    gameState.player.objetivoTemporadaActivo = sortearObjetivoDeTemporada(false);
 
     document.getElementById("season-screen").classList.add("hidden");
     // ...el resto queda igual...
@@ -2115,7 +2187,6 @@ async function simularAñoDos() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
-    generarCartaDeTemporada(resultadoAño); // 🆕
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     player.contractYearsLeft = Math.max(0, player.contractYearsLeft - 1);
@@ -2138,6 +2209,7 @@ async function simularAñoDos() {
 // INTERFAZ: PANTALLA FIN DE CONTRATO ROOKIE
 // ==========================================
 function mostrarResultadosAñoDos(res) {
+    generarCartaDeTemporada(res); // 🆕
     document.getElementById("draft-screen").classList.add("hidden");
     const seasonScreen = document.getElementById("season-screen");
 
@@ -2453,7 +2525,6 @@ async function simularSiguienteAño() {
         esRookie                // 🆕
     };
     gameState.statsHistory.push(resultadoAño);
-    generarCartaDeTemporada(resultadoAño); // 🆕
     resultadoAño.mensajeRivalHistorico = generarMensajeRivalHistorico(); // 🆕 necesita el año ya en el historial
 
     if (chequearRetiroDefinitivo()) {
@@ -3166,6 +3237,7 @@ function chequearRetiroDefinitivo() {
 // INTERFAZ: PANTALLA DEL BUCLE DE CARRERA (AÑOS 3+)
 // ==========================================
 function mostrarPantallaBucleCarrera(res) {
+    generarCartaDeTemporada(res); // 🆕 movido acá por el mismo motivo que en Año 1
     const trainingScreen = document.getElementById("draft-screen");
     if (trainingScreen) {
         trainingScreen.classList.add("hidden");
@@ -3619,16 +3691,17 @@ function renderizarProgresoRivalCompartidoHTML(datosRival) {
             </div>
         `;
     }
+    const nombreSeguro = escaparHTML(`${datosRival.firstName} ${datosRival.lastName}`);
     if (datosRival.isRetired) {
         return `
             <div class="status-box alert-equipo" id="rival-compartido-box">
-                <p>🆚 <strong>${datosRival.firstName} ${datosRival.lastName}</strong> ya se retiró de su carrera.</p>
+                <p>🆚 <strong>${nombreSeguro}</strong> ya se retiró de su carrera.</p>
             </div>
         `;
     }
     return `
         <div class="status-box alert-equipo" id="rival-compartido-box">
-            <p>🆚 <strong>${datosRival.firstName} ${datosRival.lastName}</strong> (${datosRival.position}) va en el <strong>Año ${datosRival.year}</strong>, ${datosRival.age} años, jugando en los ${datosRival.team}. Última temporada: ${datosRival.pts} PTS / ${datosRival.ast} AST / ${datosRival.reb} REB.</p>
+            <p>🆚 <strong>${nombreSeguro}</strong> (${escaparHTML(datosRival.position)}) va en el <strong>Año ${datosRival.year}</strong>, ${datosRival.age} años, jugando en los ${escaparHTML(datosRival.team)}. Última temporada: ${datosRival.pts} PTS / ${datosRival.ast} AST / ${datosRival.reb} REB.</p>
         </div>
     `;
 }
@@ -3712,7 +3785,7 @@ function renderizarRecordsPartidaHTML(records) {
     const filas = Object.keys(records).map(stat => {
         const r = records[stat];
         if (!r.nombre) return "";
-        return `<li>${etiquetas[stat]}: <strong>${r.valor}</strong> — ${r.nombre} (Año ${r.year})</li>`;
+        return `<li>${etiquetas[stat]}: <strong>${r.valor}</strong> — ${escaparHTML(r.nombre)} (Año ${r.year})</li>`;
     }).join("");
     return `<ul class="career-trophy-list">${filas}</ul>`;
 }
@@ -3894,16 +3967,17 @@ function mostrarPantallaCeremoniaConjunta(resultadoPropio, resultadoRival) {
 
     const items = resultadoPropio.logros.map(l => `<li>${l.nombre} <strong>(+${l.puntos})</strong></li>`).join("");
     const logrosRival = resolverPremiosCompartidos(resultadoRival, resultadoPropio).logros;
+    const nombreRivalSeguro = escaparHTML(resultadoRival.nombreJugador);
 
     esperaScreen.innerHTML = `
         <h2>🏆 Ceremonia de Premios — Año ${resultadoPropio.year}</h2>
         <div class="status-box alert-equipo">
-            <p><strong>Vos:</strong> ${resultadoPropio.pts} PTS / ${resultadoPropio.ast} AST / ${resultadoPropio.reb} REB / ${resultadoPropio.stl} STL / ${resultadoPropio.blk} BLK — ${resultadoPropio.team}</p>
-            <p><strong>${resultadoRival.nombreJugador}:</strong> ${resultadoRival.pts} PTS / ${resultadoRival.ast} AST / ${resultadoRival.reb} REB / ${resultadoRival.stl} STL / ${resultadoRival.blk} BLK — ${resultadoRival.team}</p>
+            <p><strong>Vos:</strong> ${resultadoPropio.pts} PTS / ${resultadoPropio.ast} AST / ${resultadoPropio.reb} REB / ${resultadoPropio.stl} STL / ${resultadoPropio.blk} BLK — ${escaparHTML(resultadoPropio.team)}</p>
+            <p><strong>${nombreRivalSeguro}:</strong> ${resultadoRival.pts} PTS / ${resultadoRival.ast} AST / ${resultadoRival.reb} REB / ${resultadoRival.stl} STL / ${resultadoRival.blk} BLK — ${escaparHTML(resultadoRival.team)}</p>
         </div>
         <h3>🏅 Tus logros</h3>
         ${renderizarLogrosHTML(resultadoPropio.logros)}
-        <h3>🏅 Logros de ${resultadoRival.nombreJugador}</h3>
+        <h3>🏅 Logros de ${nombreRivalSeguro}</h3>
         ${renderizarLogrosHTML(logrosRival)}
         <p style="text-align:center; opacity:0.7;">Continuando en unos segundos...</p>        
     `;
