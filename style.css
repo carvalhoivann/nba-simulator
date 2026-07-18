@@ -57,21 +57,20 @@ body {
 
 /* ---- Contenedor principal ---- */
 #game-container {
-    max-width: 560px;
-    margin: 0 auto;
+    position: relative;
 }
 
-/* Nameplate del proyecto, encima de la primera tarjeta */
-#game-container::before {
-    content: "NBA MINIMALIST MANAGER";
-    display: block;
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-size: 15px;
-    letter-spacing: 0.22em;
-    color: var(--hardwood);
-    text-align: center;
-    margin-bottom: 18px;
+#game-container::after {
+    content: "";
+    position: fixed;
+    top: -10%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(ellipse, rgba(226, 105, 27, 0.06), transparent 70%);
+    pointer-events: none;
+    z-index: -1;
 }
 
 .hidden {
@@ -110,6 +109,52 @@ section {
     background:
         linear-gradient(180deg, rgba(212, 175, 55, 0.06), transparent 120px),
         var(--court);
+}
+
+/* ---- Transición de entrada para cada pantalla ---- */
+@keyframes entradaPantalla {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ---- Stat boxes: aparecen con un pequeño "pop" escalonado ---- */
+@keyframes popStat {
+    from { opacity: 0; transform: scale(0.85); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.stats-grid .stat-box {
+    animation: popStat 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+
+.stats-grid .stat-box:nth-child(1) { animation-delay: 0.02s; }
+.stats-grid .stat-box:nth-child(2) { animation-delay: 0.07s; }
+.stats-grid .stat-box:nth-child(3) { animation-delay: 0.12s; }
+.stats-grid .stat-box:nth-child(4) { animation-delay: 0.17s; }
+.stats-grid .stat-box:nth-child(5) { animation-delay: 0.22s; }
+.stats-grid .stat-box:nth-child(6) { animation-delay: 0.27s; }
+
+/* ---- Logros: brillo sutil que cruza el borde izquierdo ---- */
+@keyframes brilloLogro {
+    0% { box-shadow: -3px 0 0 var(--gold), 0 0 0 rgba(212, 175, 55, 0); }
+    50% { box-shadow: -3px 0 0 var(--gold), 0 0 14px rgba(212, 175, 55, 0.35); }
+    100% { box-shadow: -3px 0 0 var(--gold), 0 0 0 rgba(212, 175, 55, 0); }
+}
+
+.logros-box li {
+    position: relative;
+    padding-left: 4px;
+    animation: brilloLogro 1.6s ease-out;
+}
+
+section:not(.hidden) {
+    animation: entradaPantalla 0.35s ease-out;
 }
 
 h2 {
@@ -227,7 +272,8 @@ button:hover:not(:disabled) {
 
 button:active:not(:disabled) {
     background: var(--hardwood-dim);
-    transform: translateY(1px);
+    transform: translateY(1px) scale(0.98);
+    transition: transform 0.08s ease, background-color 0.08s ease;
 }
 
 button:disabled {
@@ -996,4 +1042,50 @@ button:focus-visible {
     .cards-grid {
         grid-template-columns: 1fr;
     }
+}
+
+.trading-card {
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.trading-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow:
+        0 0 0 1px var(--rareza-color),
+        0 10px 28px rgba(0, 0, 0, 0.45),
+        0 0 20px color-mix(in srgb, var(--rareza-color) 35%, transparent);
+}
+
+@keyframes seleccionEnfoque {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.025); }
+    100% { transform: scale(1); }
+}
+
+.enfoque-card-activa {
+    animation: seleccionEnfoque 0.3s ease-out;
+}
+
+/* ---- Loader tipo shimmer para las cajas de "esperando..." ---- */
+.status-box.alert-equipo:has(p:only-child) {
+    position: relative;
+    overflow: hidden;
+}
+
+.status-box.alert-equipo:has(p:only-child)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.06) 50%,
+        transparent 70%
+    );
+    animation: shimmer 1.8s infinite;
+}
+
+@keyframes shimmer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
 }

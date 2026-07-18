@@ -644,31 +644,35 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
     renderizarControlesAtributos();
 
     const btnConfirmar = document.getElementById("btn-confirmar-atributos");
-    btnConfirmar.onclick = iniciarTemporadaUno;
+    btnConfirmar.onclick = () => ejecutarConBloqueo(iniciarTemporadaUno);
 
-    // 🆕 si hay carrera compartida, busca el pick del rival (por si ya
-    // drafteó) y actualiza el listado con su nombre insertado.
+    // 🆕 si hay carrera compartida, escucha en tiempo real el pick del rival
+    // (por si ya drafteó) y actualiza el listado con su nombre insertado.
     if (tieneCarreraCompartida()) {
-        let intentosDraftRival = 0;
-        const intervaloDraftRival = setInterval(async () => {
-            intentosDraftRival++;
+        const { db, doc, onSnapshot } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+
+        let resueltoDraftRival = false;
+        const unsubscribeDraftRival = onSnapshot(refPartida, async () => {
+            if (resueltoDraftRival) return;
             const draftInfoRival = await obtenerPickDelRivalCompartido();
             const contenedor = document.getElementById("draft-board-container");
 
-            if (draftInfoRival && contenedor) {
-                contenedor.innerHTML = renderizarListaDraftHTML(
-                    generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
-                );
-                clearInterval(intervaloDraftRival);
+            if (!contenedor) {
+                // Ya no estamos en la pantalla de Draft, dejamos de escuchar
+                resueltoDraftRival = true;
+                unsubscribeDraftRival();
                 return;
             }
 
-            // Si ya no estamos en la pantalla de Draft, o pasaron demasiados
-            // intentos (2 minutos aprox.), dejamos de preguntar.
-            if (!contenedor || intentosDraftRival >= 24) {
-                clearInterval(intervaloDraftRival);
+            if (draftInfoRival) {
+                contenedor.innerHTML = renderizarListaDraftHTML(
+                    generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
+                );
+                resueltoDraftRival = true;
+                unsubscribeDraftRival();
             }
-        }, 5000);
+        });
     }
 }
 
@@ -1623,7 +1627,7 @@ async function obtenerRetiroRivalCompartido() {
     }
 }
 
-let intervaloEsperaRetiroRival = null;
+let unsubscribeEsperaRetiroRival = null;
 
 function mostrarPantallaEsperandoRetiroRival(resumenPropio) {
     let esperaScreen = document.getElementById("espera-retiro-screen");
@@ -1640,16 +1644,25 @@ function mostrarPantallaEsperandoRetiroRival(resumenPropio) {
         </div>
     `;
 
-    if (intervaloEsperaRetiroRival) clearInterval(intervaloEsperaRetiroRival);
+    if (unsubscribeEsperaRetiroRival) { unsubscribeEsperaRetiroRival(); unsubscribeEsperaRetiroRival = null; }
+    if (!tieneCarreraCompartida()) return;
 
-    intervaloEsperaRetiroRival = setInterval(async () => {
+    const { db, doc, onSnapshot } = window.firestoreDB;
+    const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+
+    let resuelto = false;
+    const resolver = async () => {
+        if (resuelto) return;
         const resumenRival = await obtenerRetiroRivalCompartido();
         if (!resumenRival) return; // sigue esperando
 
-        clearInterval(intervaloEsperaRetiroRival);
-        intervaloEsperaRetiroRival = null;
+        resuelto = true;
+        if (unsubscribeEsperaRetiroRival) { unsubscribeEsperaRetiroRival(); unsubscribeEsperaRetiroRival = null; }
         mostrarComparativaFinalCarreras(resumenPropio, resumenRival);
-    }, 5000);
+    };
+
+    unsubscribeEsperaRetiroRival = onSnapshot(refPartida, () => { resolver(); });
+    resolver(); // chequeo inicial, por si el rival ya se había retirado antes
 }
 
 function mostrarComparativaFinalCarreras(resumenPropio, resumenRival) {
@@ -1916,10 +1929,55 @@ function resolverCampeonUnico(logrosPropios, rendimientoIndividualPropio, datosR
     }).filter(Boolean);
 }
 
+// 🆕 Cuando comparten equipo, la cadena de playoffs/finales/campeón tiene
+// que ser LA MISMA para los dos — es el mismo plantel, no puede perder uno
+// en primera ronda y el otro ser campeón. El primero en llegar la tira y la
+// guarda; el segundo la lee y la reutiliza.
+async function sortearOLeerCadenaPlayoffsCompartida(probPlayoffs, rendimiento, rendimientoIndividual) {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc, setDoc } = window.firestoreDB;
+        const player = gameState.player;
+        const campo = `cadenaPlayoffsCompartida_${player.currentTeam}_year${player.experience + 1}`;
+        const refPartida = doc(db, "partidas_en_vivo", player.codigoPartida);
+
+        const snap = await getDoc(refPartida);
+        if (snap.exists() && snap.data()[campo]) {
+            return snap.data()[campo]; // el rival ya la tiró, la reutilizamos
+        }
+
+        // Nadie la tiró todavía: la tiramos nosotros y la guardamos.
+        const resultado = { playoffs: false, conferencia: false, finales: false, campeon: false, finalsMvp: false };
+        if (Math.random() < probPlayoffs) {
+            resultado.playoffs = true;
+            const probConferencia = Math.min(0.55, 0.25 + rendimiento / 130);
+            if (Math.random() < probConferencia) {
+                resultado.conferencia = true;
+                const probFinalesNBA = Math.min(0.50, 0.20 + rendimiento / 150);
+                if (Math.random() < probFinalesNBA) {
+                    resultado.finales = true;
+                    const probCampeon = Math.min(0.45, 0.15 + rendimiento / 170);
+                    if (Math.random() < probCampeon) {
+                        resultado.campeon = true;
+                        const probFinalsMVP = rendimientoIndividual >= 38 ? 0.45 : 0.15;
+                        if (Math.random() < probFinalsMVP) resultado.finalsMvp = true;
+                    }
+                }
+            }
+        }
+
+        await setDoc(refPartida, { [campo]: resultado }, { merge: true });
+        return resultado;
+    } catch (e) {
+        console.warn("No se pudo sincronizar la cadena de playoffs compartida:", e);
+        return null; // fallback: cada uno tira la suya, como antes
+    }
+}
+
 // ==========================================
 // SISTEMA DE PREMIOS Y LOGROS DE TEMPORADA
 // ==========================================
-function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo, calidadEquipo, modoCompartido = false) {
+async function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo, calidadEquipo, modoCompartido = false) {
     const player = gameState.player;
     const rendimientoIndividual = pts + ast + reb + (impactoDefensivo * 15);
     const bonusEquipo = calidadEquipo ? calidadEquipo.bonusRendimiento : 0;
@@ -1942,29 +2000,49 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     else if (rendimiento >= 15) probPlayoffs = 0.30;
     else probPlayoffs = 0.10;
     const rivalMismoEquipoLogros = obtenerDatosRivalMismoEquipo();
-    if (Math.random() < probPlayoffs) {
+
+    let resultadoPlayoffsCompartido = null;
+    if (rivalMismoEquipoLogros) {
+        resultadoPlayoffsCompartido = await sortearOLeerCadenaPlayoffsCompartida(probPlayoffs, rendimiento, rendimientoIndividual);
+    }
+
+    const tirarCadenaPlayoffsPropia = () => {
+        const resultado = { playoffs: false, conferencia: false, finales: false, campeon: false, finalsMvp: false };
+        if (Math.random() < probPlayoffs) {
+            resultado.playoffs = true;
+            const probConferencia = Math.min(0.55, 0.25 + rendimiento / 130);
+            if (Math.random() < probConferencia) {
+                resultado.conferencia = true;
+                const probFinalesNBA = Math.min(0.50, 0.20 + rendimiento / 150);
+                if (Math.random() < probFinalesNBA) {
+                    resultado.finales = true;
+                    const probCampeon = Math.min(0.45, 0.15 + rendimiento / 170);
+                    if (Math.random() < probCampeon) {
+                        resultado.campeon = true;
+                        const probFinalsMVP = rendimientoIndividual >= 38 ? 0.45 : 0.15;
+                        if (Math.random() < probFinalsMVP) resultado.finalsMvp = true;
+                    }
+                }
+            }
+        }
+        return resultado;
+    };
+
+    const cadena = resultadoPlayoffsCompartido || tirarCadenaPlayoffsPropia();
+
+    if (cadena.playoffs) {
         if (rivalMismoEquipoLogros) {
             agregarLogro(`Clasificación a Playoffs 🎟️ (junto a ${rivalMismoEquipoLogros.firstName} 🤝)`, 1);
         } else {
             agregarLogro("Clasificación a Playoffs 🎟️", 1);
         }
-
-        const probConferencia = Math.min(0.55, 0.25 + rendimiento / 130);
-        if (Math.random() < probConferencia) {
+        if (cadena.conferencia) {
             agregarLogro("Finalista de Conferencia", 1);
-
-            const probFinalesNBA = Math.min(0.50, 0.20 + rendimiento / 150);
-            if (Math.random() < probFinalesNBA) {
+            if (cadena.finales) {
                 agregarLogro("Finalista de la NBA 🏀", 1);
-
-                const probCampeon = Math.min(0.45, 0.15 + rendimiento / 170);
-                if (Math.random() < probCampeon) {
+                if (cadena.campeon) {
                     agregarLogro("Campeón de la NBA 🏆", 1);
-
-                    const probFinalsMVP = rendimientoIndividual >= 38 ? 0.45 : 0.15;
-                    if (Math.random() < probFinalsMVP) {
-                        agregarLogro("Finals MVP 🏅", 2);
-                    }
+                    if (cadena.finalsMvp) agregarLogro("Finals MVP 🏅", 2);
                 }
             }
         }
@@ -2038,7 +2116,7 @@ async function iniciarTemporadaUno() {
     }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
 
-    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = await calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -2169,7 +2247,7 @@ function irAEntrenamientoAñoDos() {
 
     const btnConfirmar = document.getElementById("btn-confirmar-atributos");
     const esEntrenamientoParaAñoDos = gameState.player.experience === 1;
-    btnConfirmar.onclick = esEntrenamientoParaAñoDos ? simularAñoDos : simularSiguienteAño;
+    btnConfirmar.onclick = () => ejecutarConBloqueo(esEntrenamientoParaAñoDos ? simularAñoDos : simularSiguienteAño);
     actualizarEstadoBotonConfirmar();
 }
 
@@ -2192,7 +2270,7 @@ async function simularAñoDos() {
         if (typeof guardarTraspasoCompartido === "function") guardarTraspasoCompartido(traspaso);
     }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
-    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = await calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -2531,7 +2609,7 @@ async function simularSiguienteAño() {
         if (typeof guardarTraspasoCompartido === "function") guardarTraspasoCompartido(traspaso);
     }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
-    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
+    const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = await calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
     // 🆕 duelo narrativo contra el rival de franquicia y comparación contra
     // el rival histórico (carreras guardadas de partidas anteriores).
@@ -3308,7 +3386,7 @@ function mostrarPantallaBucleCarrera(res) {
                 <p><strong>Contrato Restante:</strong> Te queda(n) ${gameState.player.contractYearsLeft} año(s) con los ${res.team}.</p>
                 ${mensajePuntos}
             </div>
-            <button onclick="avanzarProximaTemporada()">Siguiente Temporada 🏀</button>
+            <button onclick="ejecutarConBloqueo(avanzarProximaTemporada)">Siguiente Temporada 🏀</button>
         `;
     }
 
@@ -3471,6 +3549,17 @@ function ejecutarPantallaRetiro(motivoMensaje, fueCorteForzado = false) {
     // cualquier función de simulación por si quedara algún camino de acceso.
     gameState.player.isRetired = true;
 
+    // 🆕 FIX: hay que avisarle al progreso general compartido que te retiraste,
+    // porque es lo único que consulta la ceremonia de premios (mostrarPantallaEsperandoRival)
+    // para saber si tiene sentido seguir esperando. Sin esto, guardarRetiroCompartido()
+    // avisa el retiro en su propio campo (retiro_slotX), pero el progreso general
+    // (usado por obtenerProgresoDelRivalCompartido) sigue diciendo isRetired:false
+    // para siempre, y tu compañero de partida queda esperando una ceremonia que
+    // ya nunca va a llegar.
+    if (typeof guardarProgresoCompartido === "function" && tieneCarreraCompartida()) {
+        guardarProgresoCompartido();
+    }
+
     ["creation-screen", "draft-screen", "season-screen", "office-screen", "evento-screen"].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -3601,6 +3690,34 @@ document.addEventListener("touchend", (e) => {
     }
     ultimoToqueGlobal = ahora;
 }, { passive: false });
+
+// 🆕 FIX: bloqueo de reentrada para evitar doble-simulación de temporada
+// por doble-tap en mobile mientras se espera la respuesta async/Firestore.
+let procesandoTemporada = false;
+
+async function ejecutarConBloqueo(fn) {
+    if (procesandoTemporada) return;
+    procesandoTemporada = true;
+
+    const btn = document.getElementById("btn-confirmar-atributos");
+    const textoOriginal = btn ? btn.innerText : null;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Simulando temporada... ⏳";
+    }
+
+    try {
+        await fn();
+    } finally {
+        procesandoTemporada = false;
+        // Si btn sigue en el DOM (no cambió de pantalla), lo restauramos.
+        // Si la pantalla ya cambió, esto no hace nada visible, no molesta.
+        if (btn && document.body.contains(btn)) {
+            btn.disabled = false;
+            btn.innerText = textoOriginal;
+        }
+    }
+}
 
 function todosLosAtributosAlTope() {
     return Object.keys(gameState.attributes).every(attr =>
@@ -3741,7 +3858,7 @@ function renderizarProgresoRivalCompartidoHTML(datosRival) {
 
 // Guarda el progreso propio y, en paralelo, busca e inyecta el del rival en
 // el contenedor con id="rival-compartido-box" si existe en la pantalla.
-let intervaloProgresoRival = null;
+let unsubscribeProgresoRival = null;
 
 async function sincronizarCarreraCompartida() {
     if (!tieneCarreraCompartida()) return;
@@ -3753,10 +3870,10 @@ async function sincronizarCarreraCompartida() {
     const actualizar = async () => {
         const contenedor = document.getElementById("rival-compartido-box");
         if (!contenedor) {
-            // Ya no estamos en una pantalla con ese cartel, dejamos de preguntar
-            if (intervaloProgresoRival) {
-                clearInterval(intervaloProgresoRival);
-                intervaloProgresoRival = null;
+            // Ya no estamos en una pantalla con ese cartel, dejamos de escuchar
+            if (unsubscribeProgresoRival) {
+                unsubscribeProgresoRival();
+                unsubscribeProgresoRival = null;
             }
             return;
         }
@@ -3766,8 +3883,11 @@ async function sincronizarCarreraCompartida() {
 
     await actualizar();
 
-    if (intervaloProgresoRival) clearInterval(intervaloProgresoRival);
-    intervaloProgresoRival = setInterval(actualizar, 6000);
+    if (unsubscribeProgresoRival) { unsubscribeProgresoRival(); unsubscribeProgresoRival = null; }
+
+    const { db, doc, onSnapshot } = window.firestoreDB;
+    const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+    unsubscribeProgresoRival = onSnapshot(refPartida, () => { actualizar(); });
 }
 
 // 🆕 NUEVO: RÉCORDS DE LA PARTIDA COMPARTIDA
@@ -3955,6 +4075,8 @@ function resolverPremiosCompartidos(resultadoPropio, resultadoRival) {
 
 let intervaloEsperaCeremonia = null;
 
+let unsubscribeEsperaCeremonia = null;
+
 function mostrarPantallaEsperandoRival(resultadoAño, continuarConMostrarFn) {
     ["creation-screen", "draft-screen", "season-screen", "office-screen", "evento-screen"].forEach(id => {
         const el = document.getElementById(id);
@@ -3976,36 +4098,43 @@ function mostrarPantallaEsperandoRival(resultadoAño, continuarConMostrarFn) {
         </div>
     `;
 
-    if (intervaloEsperaCeremonia) clearInterval(intervaloEsperaCeremonia);
+    if (unsubscribeEsperaCeremonia) { unsubscribeEsperaCeremonia(); unsubscribeEsperaCeremonia = null; }
+    if (!tieneCarreraCompartida()) return;
 
-    intervaloEsperaCeremonia = setInterval(async () => {
+    const { db, doc, onSnapshot } = window.firestoreDB;
+    const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+
+    let resuelto = false;
+    const resolver = async () => {
+        if (resuelto) return;
         const resultadoRival = await obtenerResultadoRivalCeremonia(resultadoAño.year);
 
-        if (!resultadoRival) {
-            // 🆕 si el rival ya se retiró, nunca va a jugar este año: no lo esperamos más.
-            const progresoRival = await obtenerProgresoDelRivalCompartido();
-            if (progresoRival && progresoRival.isRetired) {
-                clearInterval(intervaloEsperaCeremonia);
-                intervaloEsperaCeremonia = null;
-
-                const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, null);
-                resultadoAño.logros = logros;
-
-                continuarConMostrarFn(resultadoAño, bonus);
-                return;
-            }
-            return; // sigue esperando
+        if (resultadoRival) {
+            resuelto = true;
+            if (unsubscribeEsperaCeremonia) { unsubscribeEsperaCeremonia(); unsubscribeEsperaCeremonia = null; }
+            const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, resultadoRival);
+            resultadoAño.logros = logros;
+            mostrarPantallaCeremoniaConjunta(resultadoAño, resultadoRival);
+            continuarConMostrarFn(resultadoAño, bonus);
+            return;
         }
 
-        clearInterval(intervaloEsperaCeremonia);
-        intervaloEsperaCeremonia = null;
+        // Rival ya se retiró y nunca va a jugar este año: no lo esperamos más.
+        const progresoRival = await obtenerProgresoDelRivalCompartido();
+        if (progresoRival && progresoRival.isRetired) {
+            resuelto = true;
+            if (unsubscribeEsperaCeremonia) { unsubscribeEsperaCeremonia(); unsubscribeEsperaCeremonia = null; }
+            const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, null);
+            resultadoAño.logros = logros;
+            continuarConMostrarFn(resultadoAño, bonus);
+        }
+    };
 
-        const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, resultadoRival);
-        resultadoAño.logros = logros;
+    // Reacciona en tiempo real apenas el documento cambia (el rival guarda su resultado).
+    unsubscribeEsperaCeremonia = onSnapshot(refPartida, () => { resolver(); });
 
-        mostrarPantallaCeremoniaConjunta(resultadoAño, resultadoRival);
-        continuarConMostrarFn(resultadoAño, bonus);
-    }, 4000);
+    // Chequeo inicial por si el rival ya había terminado antes de que abriéramos el listener.
+    resolver();
 }
 
 function mostrarPantallaCeremoniaConjunta(resultadoPropio, resultadoRival) {
