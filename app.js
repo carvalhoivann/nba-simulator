@@ -79,6 +79,31 @@ async function obtenerPickDelRivalCompartido() {
     }
 }
 
+async function guardarDraftBoardCompartido(listaDraft) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        await setDoc(refPartida, { draftBoardCompartido: listaDraft }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el draft board compartido:", e);
+    }
+}
+
+async function obtenerDraftBoardCompartido() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+        return snap.data().draftBoardCompartido || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el draft board compartido:", e);
+        return null;
+    }
+}
+
 let intervaloDraftRival = null;
 
 function iniciarPollingRivalDraft(pick, equipo) {
@@ -283,6 +308,27 @@ async function simularDraft() {
     gameState.player.minutesPerGame = minutosIniciales;
 
     // 🆕 guarda tu pick en Firestore para que el otro dispositivo lo vea
+let listaDraftFinal;
+    if (tieneCarreraCompartida()) {
+        const boardExistente = await obtenerDraftBoardCompartido();
+        if (boardExistente) {
+            // Ya existe un board compartido (el otro jugador drafteó antes) — lo usamos
+            listaDraftFinal = boardExistente;
+            const idx = listaDraftFinal.findIndex(p => p.pick === pickAleatorio);
+            if (idx !== -1) {
+                listaDraftFinal[idx].nombre = `${inputNombre} ${inputApellido} (${selectPosicion}) — VOS`;
+                listaDraftFinal[idx].equipo = equipoAleatorio;
+                listaDraftFinal[idx].esJugadorReal = true;
+            }
+        } else {
+            // Somos los primeros — generamos el board y lo guardamos
+            listaDraftFinal = generarListaDraftCompleta(pickAleatorio, `${inputNombre} ${inputApellido}`, equipoAleatorio, selectPosicion, null);
+        }
+        await guardarDraftBoardCompartido(listaDraftFinal);
+    } else {
+        listaDraftFinal = generarListaDraftCompleta(pickAleatorio, `${inputNombre} ${inputApellido}`, equipoAleatorio, selectPosicion, null);
+    }
+
     guardarPickPropioCompartido({
         pick: pickAleatorio,
         equipo: equipoAleatorio,
@@ -290,8 +336,9 @@ async function simularDraft() {
         posicion: selectPosicion
     });
 
-    mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales);
+    mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales, listaDraftFinal);
 }
+
 
 // ==========================================
 // 🆕 MEJORA: MENSAJE CLARO DE "TENÉS QUE REPARTIR TODO"
@@ -315,7 +362,7 @@ function generarMensajePuntosHint(puntos) {
 // ==========================================
 // INTERFAZ: MOSTRAR RESULTADO DEL DRAFT
 // ==========================================
-function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
+function mostrarPantallaAsignacion(pick, equipo, puntos, minutos, listaDraftFinal) {
     document.getElementById("creation-screen").style.display = "none";
 
     const draftScreen = document.getElementById("draft-screen");
@@ -330,7 +377,7 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
         </div>
 
         <div id="draft-board-container">
-            ${renderizarListaDraftHTML(generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, null))}
+            ${renderizarListaDraftHTML(listaDraftFinal)}
         </div>
 
         <div class="status-box">
