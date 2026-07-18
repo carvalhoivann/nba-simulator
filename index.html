@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Minimalist Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <main id="game-container">
+        <!-- PANTALLA 1: CREACIÓN DE JUGADOR -->
+        <section id="creation-screen">
+            <h2>Creá tu Rookie</h2>
+            <div class="form-group">
+                <label for="firstname">Nombre:</label>
+                <input type="text" id="firstname" placeholder="Ej: Manu">
+            </div>
+            <div class="form-group">
+                <label for="lastname">Apellido:</label>
+                <input type="text" id="lastname" placeholder="Ej: Ginóbili">
+            </div>
+            <div class="form-group">
+                <label for="position">Posición:</label>
+                <select id="position">
+                    <option value="Base">Base</option>
+                    <option value="Escolta">Escolta</option>
+                    <option value="Alero">Alero</option>
+                    <option value="Ala-Pívot">Ala-Pívot</option>
+                    <option value="Pívot">Pívot</option>
+                </select>
+            </div>
+            
+            <button id="btn-draft" onclick="simularDraft()">Entrar al Draft Aleatorio 🎲</button>
+        </section>
+
+        <!-- PANTALLA 2: RESULTADO DEL DRAFT Y ASIGNACIÓN DE PUNTOS -->
+        <section id="draft-screen" class="hidden">
+            <!-- JavaScript inyecta acá los atributos, botones + y -, y el botón de confirmar -->
+        </section>
+
+        <!-- PANTALLA 3: ESTADÍSTICAS DE TEMPORADA / ANUALES -->
+        <section id="season-screen" class="hidden">
+            <!-- JavaScript inyecta acá la grilla de MIN, PTS, AST, REB de cada año -->
+        </section>
+
+        <!-- PANTALLA 4: OFICINA DE CONTRATOS Y AGENCIA LIBRE -->
+        <section id="office-screen" class="hidden">
+            <!-- JavaScript inyecta acá las ofertas de renovación o el corte de la liga -->
+        </section>
+
+        <!-- PANTALLA 5: SALÓN DE LA FAMA (RETIRO DEFINITIVO) -->
+        <section id="retire-screen" class="hidden">
+            <!-- JavaScript inyecta acá el resumen histórico final de la carrera -->
+        </section>
+    </main>  
+    <script type="module" src="firebase-init.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

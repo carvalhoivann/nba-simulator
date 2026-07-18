@@ -1,0 +1,776 @@
+/* ==========================================================
+   NBA MINIMALIST MANAGER — hoja de estilos
+   Identidad: "arena de noche + planilla de estadísticas".
+   Fondo casi negro azulado, tipografía condensada de scoreboard
+   para títulos, monoespaciada tabular para los números, y un
+   naranja de cuero de pelota como único acento fuerte.
+   ========================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+    /* ---- Paleta (6 colores con nombre) ---- */
+    --ink: #0B0E14;          /* fondo general: cancha de noche */
+    --court: #151B24;        /* superficie de las tarjetas */
+    --court-raised: #1E2733; /* superficie elevada / hover */
+    --net: #F4F1EA;          /* texto principal, blanco red de aro */
+    --hardwood: #E2691B;     /* acento primario: cuero de pelota */
+    --hardwood-dim: #A84E15; /* acento primario, estado hover/activo */
+    --scoreboard-green: #35A667; /* logros positivos, playoffs, ofertas */
+    --foul-red: #D6483F;     /* cortes, retiro forzado, alertas */
+    --gold: #D4AF37;         /* salón de la fama, ofertas estrella */
+    --line: #2A3340;         /* líneas divisorias, bordes sutiles */
+    --muted: #8B93A3;        /* texto secundario */
+
+    --radius: 10px;
+    --font-display: 'Teko', sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    color-scheme: dark;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+        repeating-linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.012) 0px,
+            rgba(255, 255, 255, 0.012) 1px,
+            transparent 1px,
+            transparent 44px
+        ),
+        var(--ink);
+    color: var(--net);
+    font-family: var(--font-body);
+    line-height: 1.5;
+    padding: 24px 16px 64px;
+}
+
+/* ---- Contenedor principal ---- */
+#game-container {
+    max-width: 560px;
+    margin: 0 auto;
+}
+
+/* Nameplate del proyecto, encima de la primera tarjeta */
+#game-container::before {
+    content: "NBA MINIMALIST MANAGER";
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.22em;
+    color: var(--hardwood);
+    text-align: center;
+    margin-bottom: 18px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* ==========================================================
+   TARJETAS DE PANTALLA (creation / draft / season / office / retire)
+   Cada una es una "tarjeta de scoreboard": superficie oscura,
+   franja superior de color que identifica el tipo de pantalla,
+   como el filo de una camiseta.
+   ========================================================== */
+section {
+    background: var(--court);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    margin-bottom: 20px;
+    border-top: 3px solid var(--hardwood);
+}
+
+#season-screen {
+    border-top-color: var(--scoreboard-green);
+}
+
+#office-screen {
+    border-top-color: var(--gold);
+}
+
+#evento-screen {
+    border-top-color: var(--scoreboard-green);
+}
+
+#retire-screen {
+    border-top-color: var(--gold);
+    background:
+        linear-gradient(180deg, rgba(212, 175, 55, 0.06), transparent 120px),
+        var(--court);
+}
+
+h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 34px;
+    letter-spacing: 0.01em;
+    line-height: 1.05;
+    margin: 0 0 18px;
+    color: var(--net);
+    text-transform: uppercase;
+}
+
+h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: 0.01em;
+    margin: 0 0 10px;
+    color: var(--net);
+    text-transform: uppercase;
+}
+
+p {
+    margin: 0 0 12px;
+    color: var(--net);
+}
+
+p strong {
+    color: var(--net);
+    font-weight: 600;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 22px 0;
+}
+
+/* ==========================================================
+   PANTALLA 1 — CREACIÓN DE JUGADOR
+   ========================================================== */
+.form-group {
+    margin-bottom: 18px;
+}
+
+.form-group label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: var(--font-body);
+    font-size: 16px;
+    color: var(--net);
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.form-group select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 20px) center, calc(100% - 15px) center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+}
+
+.form-group input::placeholder {
+    color: #4B5567;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--hardwood);
+    box-shadow: 0 0 0 3px rgba(226, 105, 27, 0.25);
+}
+
+/* ==========================================================
+   BOTONES — estilo "botón de jugada": sólido, condensado
+   ========================================================== */
+button {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    background: var(--hardwood);
+    color: var(--ink);
+    border: none;
+    border-radius: 8px;
+    padding: 13px 20px;
+    width: 100%;
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+button:hover:not(:disabled) {
+    background: #F07A2A;
+}
+
+button:active:not(:disabled) {
+    background: var(--hardwood-dim);
+    transform: translateY(1px);
+}
+
+button:disabled {
+    background: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--net);
+    outline-offset: 3px;
+}
+
+/* Botones +/- de atributos: chips redondos, no ocupan todo el ancho */
+.attr-row button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 20px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* ==========================================================
+   PANTALLA 2 — DRAFT Y ASIGNACIÓN DE ATRIBUTOS
+   ========================================================== */
+.draft-card {
+    background: var(--court-raised);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    border-left: 3px solid var(--hardwood);
+}
+
+.draft-card h3 {
+    margin-top: 6px;
+    margin-bottom: 0;
+    color: var(--hardwood);
+}
+
+.status-box {
+    background: var(--court-raised);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    border-left: 3px solid var(--line);
+}
+
+.status-box p:last-child {
+    margin-bottom: 0;
+}
+
+#puntos-contador {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--hardwood);
+    font-size: 18px;
+}
+
+#contenedor-atributos {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 16px 0 22px;
+}
+
+.attr-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px 8px 16px;
+}
+
+.attr-name {
+    flex: 1;
+    font-size: 14.5px;
+    color: var(--net);
+}
+
+.attr-value {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 17px;
+    color: var(--net);
+    min-width: 24px;
+    text-align: center;
+}
+
+/* ==========================================================
+   PANTALLA 3 — GRILLA DE ESTADÍSTICAS (el elemento distintivo:
+   una "planilla de box score" en números tabulares monoespaciados)
+   ========================================================== */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 18px 0;
+}
+
+.stat-box {
+    background: var(--court);
+    padding: 14px 6px;
+    text-align: center;
+}
+
+.stat-box p {
+    margin: 0 0 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+}
+
+.stat-box h3 {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--net);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Logros de la temporada: usa .status-box como base, esto ajusta la lista */
+.logros-box ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.logros-box li {
+    margin-bottom: 6px;
+    font-size: 14.5px;
+}
+
+.logros-box li:last-child {
+    margin-bottom: 0;
+}
+
+/* ==========================================================
+   ESTADOS SEMÁNTICOS DE .status-box (warning / danger / dark)
+   🆕 FIX: antes el JS ponía background-color y color inline en el
+   .status-box padre, pero las reglas "p { color: var(--net) }" y
+   "p strong { color: var(--net) }" de más arriba son más específicas
+   y pisaban ese color inline — el texto quedaba con el mismo tono
+   claro de siempre sobre un fondo claro, prácticamente invisible.
+   Ahora son clases dedicadas que fijan el color en cada elemento hijo
+   (p, strong, h3) para que nada lo vuelva a pisar.
+   ========================================================== */
+.status-box.alert-warning {
+    background-color: #ffeaa7;
+    border-left-color: var(--hardwood);
+}
+
+.status-box.alert-warning p,
+.status-box.alert-warning p strong,
+.status-box.alert-warning h3 {
+    color: #2d3436;
+}
+
+.status-box.alert-danger {
+    background-color: #ff7675;
+    border-left-color: var(--foul-red);
+}
+
+.status-box.alert-danger p,
+.status-box.alert-danger p strong,
+.status-box.alert-danger h3 {
+    color: #fff;
+}
+
+.status-box.alert-dark {
+    background-color: #2c3e50;
+    border-left-color: var(--gold);
+}
+
+.status-box.alert-dark p,
+.status-box.alert-dark p strong,
+.status-box.alert-dark h3 {
+    color: #fff;
+}
+
+.logros-box.alert-info {
+    background-color: #dff9fb;
+    border-left-color: var(--scoreboard-green);
+}
+
+.logros-box.alert-info h3,
+.logros-box.alert-info li {
+    color: #130f40;
+}
+
+/* ==========================================================
+   TARJETA DE JUGADOR (nombre, equipo, posición, edad y GRL)
+   Se muestra arriba de las pantallas de temporada / oficina / retiro.
+   ========================================================== */
+.player-card {
+    background: var(--court-raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.player-card-name {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: var(--net);
+    margin: 0 0 2px;
+}
+
+.player-card-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 8px;
+}
+
+.player-card-details {
+    display: flex;
+    gap: 14px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.player-card-details strong {
+    color: var(--net);
+}
+
+.player-card-grl {
+    text-align: center;
+    flex-shrink: 0;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+.player-card-grl span {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+}
+
+.player-card-grl h3 {
+    margin: 2px 0 0;
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 600;
+    text-transform: none;
+    color: var(--hardwood);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================
+   PANTALLA 4 — OFICINA / AGENCIA LIBRE
+   ========================================================== */
+.contenedor-ofertas {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.oferta-card {
+    background: var(--court-raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 18px;
+}
+
+.oferta-card h3 {
+    font-size: 19px;
+    color: var(--scoreboard-green);
+    margin-bottom: 6px;
+}
+
+.oferta-card p {
+    color: var(--muted);
+    margin-bottom: 12px;
+}
+
+.oferta-card button {
+    background: var(--scoreboard-green);
+    color: var(--ink);
+}
+
+.oferta-card button:hover:not(:disabled) {
+    background: #3FBB76;
+}
+
+/* Ofertas "estrella": tratamiento dorado, como un contrato máximo */
+.oferta-card.estrella {
+    border-color: var(--gold);
+    background: linear-gradient(180deg, rgba(212, 175, 55, 0.1), var(--court-raised) 60%);
+}
+
+.oferta-card.estrella h3 {
+    color: var(--gold);
+}
+
+.oferta-card.estrella button {
+    background: var(--gold);
+    color: var(--ink);
+}
+
+.oferta-card.estrella button:hover:not(:disabled) {
+    background: #E4C158;
+}
+
+/* Vitrina de trofeos de toda la carrera, en el retiro */
+.career-trophy-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.career-trophy-list li {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    background: var(--court-raised);
+    border-left: 3px solid var(--gold);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--net);
+}
+
+.career-no-trophies {
+    color: var(--muted);
+    font-style: italic;
+}
+
+/* Veredicto del Salón de la Fama */
+.status-box.hof-box {
+    background: linear-gradient(180deg, rgba(212, 175, 55, 0.14), var(--court-raised) 70%);
+    border-left-color: var(--gold);
+    text-align: center;
+}
+
+.hof-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+}
+
+.hof-tier {
+    color: var(--gold);
+    font-size: 28px;
+    margin-bottom: 10px;
+}
+
+
+#retire-screen h2 {
+    color: var(--gold);
+}
+
+#retire-screen ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#retire-screen li {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    background: var(--court-raised);
+    border-left: 3px solid var(--gold);
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+
+#retire-screen button {
+    background: var(--gold);
+    color: var(--ink);
+}
+
+#retire-screen button:hover:not(:disabled) {
+    background: #E4C158;
+}
+
+.status-box.alert-evento {
+    background-color: var(--court-raised);
+    border-left-color: var(--scoreboard-green);
+}
+
+.status-box.alert-equipo {
+    background-color: var(--court-raised);
+    border-left-color: var(--gold);
+}
+
+/* ==========================================================
+   🆕 NUEVO — PANTALLA DE DECISIÓN DE EVENTO
+   ========================================================== */
+.evento-opciones {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.evento-opcion-btn {
+    background: var(--court-raised);
+    border: 1px solid var(--line);
+    color: var(--net);
+    text-transform: none;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 15.5px;
+    letter-spacing: 0;
+    text-align: left;
+    padding: 14px 16px;
+}
+
+.evento-opcion-btn:hover:not(:disabled) {
+    background: var(--ink);
+    border-color: var(--scoreboard-green);
+}
+
+.evento-opcion-btn:active:not(:disabled) {
+    background: var(--ink);
+}
+
+/* ==========================================================
+   🆕 NUEVO — SELECTOR DE ENFOQUE DE TEMPORADA
+   Tarjetas seleccionables (Modo Estrella / Cuidar el Cuerpo / Juego de
+   Equipo / Profesional), en la misma línea visual que el resto de las
+   tarjetas de la app: fondo oscuro, borde sutil, acento naranja al elegir.
+   ========================================================== */
+.enfoque-selector {
+    margin: 22px 0;
+}
+
+.enfoque-selector h3 {
+    margin-bottom: 10px;
+}
+
+.enfoque-hint {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--hardwood);
+    margin-bottom: 12px;
+    min-height: 16px;
+}
+
+.enfoque-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.enfoque-card {
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.enfoque-card:hover {
+    border-color: var(--hardwood-dim);
+}
+
+.enfoque-card h4 {
+    margin: 0 0 6px;
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: var(--net);
+}
+
+.enfoque-card p {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+.enfoque-card-activa {
+    border-color: var(--hardwood);
+    background: linear-gradient(180deg, rgba(226, 105, 27, 0.10), var(--ink) 70%);
+}
+
+.enfoque-card-activa h4 {
+    color: var(--hardwood);
+}
+
+/* ==========================================================
+   RESPONSIVE — pantallas angostas
+   ========================================================== */
+@media (max-width: 380px) {
+    body {
+        padding: 16px 10px 48px;
+    }
+
+    section {
+        padding: 20px 16px;
+    }
+
+    h2 {
+        font-size: 28px;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .stat-box h3 {
+        font-size: 22px;
+    }
+}
+
+/* ---- Accesibilidad: respeta reduce-motion ---- */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+        animation: none !important;
+    }
+}
