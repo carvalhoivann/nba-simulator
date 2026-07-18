@@ -21,16 +21,10 @@ const gameState = {
     },
     // Los 10 atributos obligatorios arrancan en el mínimo (1)
     attributes: {
-        tiroExt: 1,
-        tiroInt: 1,
-        bandejas: 1,
-        dribbling: 1,
-        pases: 1,
-        vision: 1,
-        defExt: 1,
-        defInt: 1,
-        fisico: 1,
-        fuerza: 1
+        bandeja: 1, clavada: 1, tiroInterior: 1, mediaDistancia: 1, triple: 1, tiroLibre: 1,
+        dribbling: 1, pase: 1, vision: 1,
+        rebote: 1, tapon: 1, robo: 1,
+        fuerza: 1, velocidad: 1, resistencia: 1
     },
     statsHistory: []
 };
@@ -46,90 +40,6 @@ const nbaTeams = [
     "Portland Trail Blazers", "Sacramento Kings", "San Antonio Spurs", "Toronto Raptors",
     "Utah Jazz", "Washington Wizards"
 ];
-
-// ==========================================
-// 🆕 FALTABAN: PICK DE DRAFT COMPARTIDO
-// ==========================================
-async function guardarPickPropioCompartido(datosPick) {
-    if (!tieneCarreraCompartida()) return;
-    try {
-        const { db, doc, setDoc } = window.firestoreDB;
-        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
-        const campo = `draft_${gameState.player.slotPropio}`;
-        await setDoc(refPartida, { [campo]: datosPick }, { merge: true });
-    } catch (e) {
-        console.warn("No se pudo guardar el pick de Draft compartido:", e);
-    }
-}
-
-async function obtenerPickDelRivalCompartido() {
-    if (!tieneCarreraCompartida()) return null;
-    try {
-        const { db, doc, getDoc } = window.firestoreDB;
-        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
-        const snap = await getDoc(refPartida);
-        if (!snap.exists()) return null;
-
-        const data = snap.data();
-        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
-        return data[`draft_${slotRival}`] || null;
-    } catch (e) {
-        console.warn("No se pudo consultar el pick del rival compartido:", e);
-        return null;
-    }
-}
-
-async function guardarDraftBoardCompartido(listaDraft) {
-    if (!tieneCarreraCompartida()) return;
-    try {
-        const { db, doc, setDoc } = window.firestoreDB;
-        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
-        await setDoc(refPartida, { draftBoardCompartido: listaDraft }, { merge: true });
-    } catch (e) {
-        console.warn("No se pudo guardar el draft board compartido:", e);
-    }
-}
-
-async function obtenerDraftBoardCompartido() {
-    if (!tieneCarreraCompartida()) return null;
-    try {
-        const { db, doc, getDoc } = window.firestoreDB;
-        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
-        const snap = await getDoc(refPartida);
-        if (!snap.exists()) return null;
-        return snap.data().draftBoardCompartido || null;
-    } catch (e) {
-        console.warn("No se pudo consultar el draft board compartido:", e);
-        return null;
-    }
-}
-
-let intervaloDraftRival = null;
-
-function iniciarPollingRivalDraft(pick, equipo) {
-    if (!tieneCarreraCompartida()) return;
-    detenerPollingRivalDraft();
-
-    intervaloDraftRival = setInterval(async () => {
-        const draftInfoRival = await obtenerPickDelRivalCompartido();
-        if (!draftInfoRival) return;
-
-        const contenedor = document.getElementById("draft-board-container");
-        if (contenedor) {
-            contenedor.innerHTML = renderizarListaDraftHTML(
-                generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
-            );
-        }
-        detenerPollingRivalDraft();
-    }, 5000);
-}
-
-function detenerPollingRivalDraft() {
-    if (intervaloDraftRival) {
-        clearInterval(intervaloDraftRival);
-        intervaloDraftRival = null;
-    }
-}
 
 // ==========================================
 // 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
@@ -237,10 +147,9 @@ function renderizarListaDraftHTML(listaDraft) {
 // como en la realidad. Los puntos de logros/premios se siguen sumando aparte
 // SIEMPRE, incluso en la fase de declive.
 function calcularPuntosBaseDesarrollo(experience) {
-    if (experience <= 3) return 3;   // Años 1-3: desarrollo acelerado de novato
-    if (experience <= 6) return 2;   // Años 4-6: todavía mejorando con fuerza
-    if (experience <= 10) return 1;  // Años 7-10: ajustes finos de veterano
-    return 0;                        // Año 11+: el techo natural ya se tocó
+    if (experience <= 3) return 2;   // Años 1-3: desarrollo acelerado de novato
+    if (experience <= 7) return 1;   // Años 4-7: mejoras finas de veterano
+    return 0;                        // Año 8+: el techo natural ya se tocó
 }
 
 // ==========================================
@@ -308,27 +217,6 @@ async function simularDraft() {
     gameState.player.minutesPerGame = minutosIniciales;
 
     // 🆕 guarda tu pick en Firestore para que el otro dispositivo lo vea
-let listaDraftFinal;
-    if (tieneCarreraCompartida()) {
-        const boardExistente = await obtenerDraftBoardCompartido();
-        if (boardExistente) {
-            // Ya existe un board compartido (el otro jugador drafteó antes) — lo usamos
-            listaDraftFinal = boardExistente;
-            const idx = listaDraftFinal.findIndex(p => p.pick === pickAleatorio);
-            if (idx !== -1) {
-                listaDraftFinal[idx].nombre = `${inputNombre} ${inputApellido} (${selectPosicion}) — VOS`;
-                listaDraftFinal[idx].equipo = equipoAleatorio;
-                listaDraftFinal[idx].esJugadorReal = true;
-            }
-        } else {
-            // Somos los primeros — generamos el board y lo guardamos
-            listaDraftFinal = generarListaDraftCompleta(pickAleatorio, `${inputNombre} ${inputApellido}`, equipoAleatorio, selectPosicion, null);
-        }
-        await guardarDraftBoardCompartido(listaDraftFinal);
-    } else {
-        listaDraftFinal = generarListaDraftCompleta(pickAleatorio, `${inputNombre} ${inputApellido}`, equipoAleatorio, selectPosicion, null);
-    }
-
     guardarPickPropioCompartido({
         pick: pickAleatorio,
         equipo: equipoAleatorio,
@@ -336,9 +224,8 @@ let listaDraftFinal;
         posicion: selectPosicion
     });
 
-    mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales, listaDraftFinal);
+    mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales);
 }
-
 
 // ==========================================
 // 🆕 MEJORA: MENSAJE CLARO DE "TENÉS QUE REPARTIR TODO"
@@ -347,8 +234,8 @@ let listaDraftFinal;
 // pero no quedaba claro POR QUÉ. Este mensaje deja explícita la regla: no se
 // puede avanzar de temporada con puntos sin repartir.
 function generarMensajePuntosHint(puntos) {
-    if (puntos > 0 && todosLosAtributosAlTope()) {
-        return `<p id="puntos-hint" style="color: var(--scoreboard-green);">✅ Ya tenés todos los atributos al máximo (15). Los <strong>${puntos}</strong> punto(s) restantes no se pueden usar — ya podés confirmar.</p>`;
+    if (puntos > 0 && todosLosAtributosAlTope()) {return `<p id="puntos-hint" style="color: var(--scoreboard-green);">✅ Ya tenés todos los atributos al máximo posible para tu posición. Los <strong>${puntos}</strong> punto(s) restantes no se pueden usar — ya podés confirmar.</p>`;
+        
     }
     if (puntos > 0) {
         return `<p id="puntos-hint" style="color: var(--hardwood);">⚠️ Repartí los <strong>${puntos}</strong> punto(s) restantes para poder confirmar y simular la temporada.</p>`;
@@ -362,7 +249,7 @@ function generarMensajePuntosHint(puntos) {
 // ==========================================
 // INTERFAZ: MOSTRAR RESULTADO DEL DRAFT
 // ==========================================
-function mostrarPantallaAsignacion(pick, equipo, puntos, minutos, listaDraftFinal) {
+function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
     document.getElementById("creation-screen").style.display = "none";
 
     const draftScreen = document.getElementById("draft-screen");
@@ -377,7 +264,7 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos, listaDraftFina
         </div>
 
         <div id="draft-board-container">
-            ${renderizarListaDraftHTML(listaDraftFinal)}
+            ${renderizarListaDraftHTML(generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, null))}
         </div>
 
         <div class="status-box">
@@ -387,7 +274,7 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos, listaDraftFina
         </div>
 
         <hr>
-        <h3>Repartí tus puntos de Atributos (Máximo 15 por barra):</h3>
+        <h3>Repartí tus puntos de Atributos (Máximo 20 por barra, según tu posición):</h3>
         <p>Puntos restantes: <span id="puntos-contador">${puntos}</span></p>
         ${generarMensajePuntosHint(puntos)}
 
@@ -404,9 +291,19 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos, listaDraftFina
     const btnConfirmar = document.getElementById("btn-confirmar-atributos");
     btnConfirmar.onclick = iniciarTemporadaUno;
 
-    // 🆕 si hay carrera compartida, arranca el polling para detectar el pick
-    // del rival apenas lo haga (aunque sea después que vos).
-    iniciarPollingRivalDraft(pick, equipo);
+    // 🆕 si hay carrera compartida, busca el pick del rival (por si ya
+    // drafteó) y actualiza el listado con su nombre insertado.
+    if (tieneCarreraCompartida()) {
+        obtenerPickDelRivalCompartido().then(draftInfoRival => {
+            if (!draftInfoRival) return;
+            const contenedor = document.getElementById("draft-board-container");
+            if (contenedor) {
+                contenedor.innerHTML = renderizarListaDraftHTML(
+                    generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
+                );
+            }
+        });
+    }
 }
 
 // ==========================================
@@ -417,16 +314,19 @@ function renderizarControlesAtributos() {
     contenedor.innerHTML = "";
 
     const nombresAmigables = {
-        tiroExt: "Tiro Exterior", tiroInt: "Tiro Interior", bandejas: "Bandejas/Volcadas",
-        dribbling: "Dribbling", pases: "Pases", vision: "Visión de Juego",
-        defExt: "Defensa Exterior", defInt: "Defensa Interior", fisico: "Físico/Velocidad", fuerza: "Fuerza"
+        bandeja: "Bandeja", clavada: "Clavada", tiroInterior: "Tiro Interior",
+        mediaDistancia: "Media Distancia", triple: "Triple", tiroLibre: "Tiro Libre",
+        dribbling: "Dribbling", pase: "Pase", vision: "Visión de Juego",
+        rebote: "Rebote", tapon: "Tapón", robo: "Robo",
+        fuerza: "Fuerza", velocidad: "Velocidad", resistencia: "Resistencia"
     };
 
     Object.keys(gameState.attributes).forEach(attr => {
+        const tope = obtenerTopeAtributo(gameState.player.position, attr);
         const fila = document.createElement("div");
         fila.className = "attr-row";
         fila.innerHTML = `
-            <span class="attr-name">${nombresAmigables[attr]}:</span>
+            <span class="attr-name">${nombresAmigables[attr]} <small style="opacity:0.6">(tope ${tope})</small>:</span>
             <button onclick="modificarAtributo('${attr}', -1)">-</button>
             <span id="val-${attr}" class="attr-value">${gameState.attributes[attr]}</span>
             <button onclick="modificarAtributo('${attr}', 1)">+</button>
@@ -444,7 +344,8 @@ function modificarAtributo(attr, cambio) {
     const valorActual = gameState.attributes[attr];
     const puntosDisponibles = gameState.player.availablePoints;
 
-    if (cambio === 1 && (valorActual >= 15 || puntosDisponibles <= 0)) return;
+    const tope = obtenerTopeAtributo(gameState.player.position, attr);
+    if (cambio === 1 && (valorActual >= tope || puntosDisponibles <= 0)) return;
     if (cambio === -1 && valorActual <= 1) return;
 
     gameState.attributes[attr] += cambio;
@@ -482,6 +383,41 @@ const bonosPorPosicion = {
     "Pívot":      { tiro: 0.80, pases: 0.65, reboteo: 1.30, robos: 0.75, tapones: 1.40 }
 };
 
+// ==========================================
+// 🆕 NUEVO: TOPES DUROS DE ATRIBUTOS POR POSICIÓN
+// ==========================================
+// Cada posición tiene un límite máximo distinto para cada atributo, en vez
+// de que todos puedan llegar a 20 en todo. Esto obliga a builds realistas:
+// un Base no puede ser un tapón elite, un Pívot no puede ser un asesino del
+// triple. El límite general (si no está listado) es 20.
+const TOPES_POR_POSICION = {
+    "Base": {
+        clavada: 12, tiroInterior: 14, rebote: 12, tapon: 8, fuerza: 14,
+        dribbling: 20, vision: 20, pase: 20, triple: 20, velocidad: 20
+    },
+    "Escolta": {
+        clavada: 14, rebote: 13, tapon: 10, fuerza: 15,
+        triple: 20, mediaDistancia: 20, dribbling: 20
+    },
+    "Alero": {
+        // el más versátil: sin topes especiales, todo hasta 20
+    },
+    "Ala-Pívot": {
+        triple: 14, dribbling: 13, vision: 13, velocidad: 15,
+        rebote: 20, fuerza: 20, tapon: 20
+    },
+    "Pívot": {
+        triple: 10, dribbling: 10, vision: 12, velocidad: 13, pase: 13,
+        rebote: 20, tapon: 20, fuerza: 20, clavada: 20
+    }
+};
+
+function obtenerTopeAtributo(position, attr) {
+    const topes = TOPES_POR_POSICION[position];
+    if (topes && topes[attr] !== undefined) return topes[attr];
+    return 20; // tope general si no hay restricción especial
+}
+
 function obtenerBonoPosicion(position) {
     return bonosPorPosicion[position] || { tiro: 1.0, pases: 1.0, reboteo: 1.0, robos: 1.0, tapones: 1.0 };
 }
@@ -497,11 +433,36 @@ function obtenerBonoPosicion(position) {
 // videojuego de básquet: un Base vale por manejo/pases/visión, un Pívot por
 // rebote/fuerza/juego interior.
 const pesosGRLPorPosicion = {
-    "Base":       { tiroExt: 0.10, tiroInt: 0.05, bandejas: 0.05, dribbling: 0.15, pases: 0.20, vision: 0.18, defExt: 0.12, defInt: 0.03, fisico: 0.07, fuerza: 0.05 },
-    "Escolta":    { tiroExt: 0.20, tiroInt: 0.10, bandejas: 0.08, dribbling: 0.14, pases: 0.08, vision: 0.08, defExt: 0.14, defInt: 0.03, fisico: 0.10, fuerza: 0.05 },
-    "Alero":      { tiroExt: 0.14, tiroInt: 0.10, bandejas: 0.10, dribbling: 0.10, pases: 0.08, vision: 0.08, defExt: 0.12, defInt: 0.08, fisico: 0.12, fuerza: 0.08 },
-    "Ala-Pívot":  { tiroExt: 0.06, tiroInt: 0.14, bandejas: 0.12, dribbling: 0.04, pases: 0.05, vision: 0.05, defExt: 0.06, defInt: 0.16, fisico: 0.12, fuerza: 0.20 },
-    "Pívot":      { tiroExt: 0.03, tiroInt: 0.15, bandejas: 0.15, dribbling: 0.02, pases: 0.03, vision: 0.03, defExt: 0.04, defInt: 0.20, fisico: 0.13, fuerza: 0.22 }
+    "Base": {
+        bandeja: 0.03, clavada: 0.02, tiroInterior: 0.03, mediaDistancia: 0.06, triple: 0.10, tiroLibre: 0.03,
+        dribbling: 0.15, pase: 0.18, vision: 0.15,
+        rebote: 0.03, tapon: 0.01, robo: 0.10,
+        fuerza: 0.03, velocidad: 0.06, resistencia: 0.02
+    },
+    "Escolta": {
+        bandeja: 0.04, clavada: 0.03, tiroInterior: 0.05, mediaDistancia: 0.14, triple: 0.16, tiroLibre: 0.04,
+        dribbling: 0.12, pase: 0.06, vision: 0.06,
+        rebote: 0.05, tapon: 0.01, robo: 0.09,
+        fuerza: 0.04, velocidad: 0.08, resistencia: 0.03
+    },
+    "Alero": {
+        bandeja: 0.05, clavada: 0.04, tiroInterior: 0.06, mediaDistancia: 0.09, triple: 0.09, tiroLibre: 0.04,
+        dribbling: 0.08, pase: 0.07, vision: 0.07,
+        rebote: 0.07, tapon: 0.04, robo: 0.07,
+        fuerza: 0.07, velocidad: 0.07, resistencia: 0.09
+    },
+    "Ala-Pívot": {
+        bandeja: 0.06, clavada: 0.07, tiroInterior: 0.12, mediaDistancia: 0.04, triple: 0.02, tiroLibre: 0.03,
+        dribbling: 0.03, pase: 0.03, vision: 0.03,
+        rebote: 0.16, tapon: 0.10, robo: 0.04,
+        fuerza: 0.17, velocidad: 0.04, resistencia: 0.06
+    },
+    "Pívot": {
+        bandeja: 0.08, clavada: 0.10, tiroInterior: 0.12, mediaDistancia: 0.02, triple: 0.01, tiroLibre: 0.02,
+        dribbling: 0.01, pase: 0.02, vision: 0.02,
+        rebote: 0.18, tapon: 0.14, robo: 0.02,
+        fuerza: 0.18, velocidad: 0.02, resistencia: 0.06
+    }
 };
 
 // 🆕 MEJORA: antes calcularGRL() calculaba el promedio ponderado por posición
@@ -538,7 +499,7 @@ function calcularMinutosDelAño(modificadorSuerte) {
     const player = gameState.player;
     const grl = calcularPromedioPonderadoPorPosicion(); // 1 a 15
 
-    const fraccion = (grl - 1) / 14; // 0 (piso) a 1 (techo absoluto)
+    const fraccion = (grl - 1) / 19; // 0 (piso) a 1 (techo absoluto)
     let base = 6 + fraccion * 32; // escala continua: 6 a 38 minutos según nivel
 
     // Ruido normal de un año a otro: competencia en el roster, preferencias
@@ -565,7 +526,7 @@ function calcularMinutosDelAño(modificadorSuerte) {
     const probBreakoutBase = modificadorSuerte >= 1.15 ? 0.32 : 0.18;
     const probRegresionBase = modificadorSuerte <= 0.85 ? 0.20 : 0.10;
 
-    if (player.minutesPerGame <= 18 && grl >= 8 && Math.random() < probBreakoutBase) {
+    if (player.minutesPerGame <= 18 && grl >= 11 && Math.random() < probBreakoutBase) {
         base += 10 + Math.random() * 8;
         huboBreakout = true;
     } else if (player.minutesPerGame >= 24 && Math.random() < probRegresionBase) {
@@ -603,7 +564,7 @@ function calcularGRL() {
     const TECHO_GRL = 99;
 
     const escalar = (promedioPonderado) => {
-        const fraccion = promedioPonderado / 15; // 0 (imposible) a 1 (todo al máximo)
+        const fraccion = promedioPonderado / 20; // 0 (imposible) a 1 (todo al máximo)
         return Math.round(PISO_GRL + fraccion * (TECHO_GRL - PISO_GRL));
     };
 
@@ -656,10 +617,10 @@ function renderizarTarjetaJugador() {
 // cueste de verdad, y que builds repartidas o especializadas-pero-completas
 // rindan mejor en el balance general.
 function calcularFactorEspecializacion(nivelPrincipal, nivelApoyo) {
-    if (nivelPrincipal <= 10) return 1.0; // recién penaliza si sos realmente bueno en lo principal
-    const apoyoFaltante = Math.max(0, 8 - nivelApoyo); // por debajo de 8/15 empieza a doler
+    if (nivelPrincipal <= 13) return 1.0; // recién penaliza si sos realmente bueno en lo principal
+    const apoyoFaltante = Math.max(0, 11 - nivelApoyo); // por debajo de 11/20 empieza a doler
     if (apoyoFaltante <= 0) return 1.0;
-    const carencia = apoyoFaltante / 8; // 0 (apoyo=8) a 1 (apoyo=0)
+    const carencia = apoyoFaltante / 11;
     const base = 1 - carencia * 0.55;
     const variacionAzar = (Math.random() - 0.5) * 0.22;
     return Math.max(0.40, Math.min(1.0, base + variacionAzar));
@@ -717,8 +678,6 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     const player = gameState.player;
     const bonoPos = obtenerBonoPosicion(player.position);
 
-    // 🆕 MEJORA: ruido independiente por categoría (ahora las 5 stats, no solo
-    // 3), con chance propia de anomalía en cada una — ver generarRuidoStat().
     const ruidoPts = generarRuidoStat();
     const ruidoAst = generarRuidoStat();
     const ruidoReb = generarRuidoStat();
@@ -727,50 +686,31 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
 
     const multiplicadorMinutos = player.minutesPerGame / 36;
 
-    const TECHO_PTS = 34;
+    const TECHO_PTS = 32;
     const TECHO_AST = 12;
     const TECHO_REB = 13;
     const TECHO_STL = 2.8;
     const TECHO_BLK = 2.6;
-    // 🆕 MEJORA: el exponente 1.7 hacía que la curva se comiera casi todo el
-    // rendimiento salvo que tuvieras el atributo relacionado casi al tope.
-    // Con 1.7, un nivel "medio" (0.5 en escala 0-1) rendía apenas ~30% del
-    // techo. Bajarlo a 1.35 sigue premiando el atributo alto (la curva no es
-    // lineal, un 15 en la barra sigue siendo mucho mejor que un 8), pero un
-    // jugador bien invertido sin ser perfecto ahora promedia números de
-    // rotación real, no de banco de emergencia.
     const EXPONENTE_CURVA = 1.35;
 
-    // 🆕 MEJORA: el dribbling ahora suma (con peso menor) a tu nivel de tiro,
-    // porque en la cancha real el hándil es lo que te permite crearte tu propio
-    // tiro. Antes era un atributo "de adorno" que solo servía para no activar
-    // una penalización — si le metías puntos, no rendía nada a cambio.
-    Tiro = (((attrs.tiroExt * 1.2 + attrs.tiroInt * 1.0 + attrs.bandejas * 1.1 + attrs.dribbling * 0.5) / 3.8) / 15) * bonoPos.tiro;
-    const nivelTiro = Math.min(1, (((attrs.tiroExt * 1.2 + attrs.tiroInt * 1.0 + attrs.bandejas * 1.1 + attrs.dribbling * 0.5) / 3.8) / 15) * bonoPos.tiro);
-    const nivelPases = Math.min(1, (((attrs.vision * 0.8 + attrs.pases * 0.4) / 1.2) / 15) * bonoPos.pases);
-    const nivelReboteo = Math.min(1, (((attrs.defInt * 0.5 + attrs.fuerza * 0.6 + attrs.fisico * 0.3) / 1.4) / 15) * bonoPos.reboteo);
-    const nivelRobos = Math.min(1, (attrs.defExt / 15) * bonoPos.robos);
-    const nivelTapones = Math.min(1, (attrs.defInt / 15) * bonoPos.tapones);
+    // 🆕 Composición de tiro con los 6 atributos de anotación + asistido por
+    // dribbling (el manejo te crea tu propio tiro). Escala 1-20.
+    const tiroCompuesto = attrs.bandeja * 0.12 + attrs.clavada * 0.08 + attrs.tiroInterior * 0.18 +
+        attrs.mediaDistancia * 0.20 + attrs.triple * 0.24 + attrs.tiroLibre * 0.10 + attrs.dribbling * 0.08;
+    const nivelTiro = Math.min(1, (tiroCompuesto / 20) * bonoPos.tiro);
 
-    // 🆕 MEJORA: cada stat ahora tiene su propio "atributo de apoyo" que
-    // castiga la especialización pura (ver calcularFactorEspecializacion):
-    // - Tiro necesita manejo/físico para crearse el propio tiro.
-    // - Pases necesitan visión de juego respaldada por manejo de balón.
-    // - Rebote necesita fuerza para ganar la posición bajo el aro.
-    // - Robos necesitan físico/velocidad para anticipar sin quedar parado.
-    // - Tapones necesitan fuerza para defender el aro sin caer en falta.
-    const factorTiro = calcularFactorEspecializacion(attrs.tiroExt, Math.min(attrs.dribbling, attrs.fisico));
-    const factorPases = calcularFactorEspecializacion(attrs.vision, attrs.pases);
-    const factorReboteo = calcularFactorEspecializacion(attrs.defInt, attrs.fuerza);
-    const factorRobos = calcularFactorEspecializacion(attrs.defExt, attrs.fisico);
-    const factorTapones = calcularFactorEspecializacion(attrs.defInt, attrs.fuerza);
+    const nivelPases = Math.min(1, ((attrs.vision * 0.5 + attrs.pase * 0.35 + attrs.dribbling * 0.15) / 20) * bonoPos.pases);
+    const nivelReboteo = Math.min(1, ((attrs.rebote * 0.6 + attrs.fuerza * 0.25 + attrs.velocidad * 0.15) / 20) * bonoPos.reboteo);
+    const nivelRobos = Math.min(1, ((attrs.robo * 0.7 + attrs.velocidad * 0.3) / 20) * bonoPos.robos);
+    const nivelTapones = Math.min(1, ((attrs.tapon * 0.7 + attrs.fuerza * 0.3) / 20) * bonoPos.tapones);
 
-    // 🆕 MEJORA: nivel de defensa, separado de PTS/AST/REB (para no inflar tu
-    // planilla ofensiva con puntos de defensa), pero que ahora SÍ importa:
-    // impacta en las chances de tu equipo de avanzar en playoffs y habilita
-    // el premio a Mejor Defensor. Antes, meterle fichas a defExt/defInt para
-    // armar un jugador defensivo no te devolvía absolutamente nada.
-    const nivelDefensa = ((attrs.defExt * 0.55 + attrs.defInt * 0.45) / 1.0) / 15;
+    const factorTiro = calcularFactorEspecializacion(attrs.triple, Math.min(attrs.dribbling, attrs.resistencia));
+    const factorPases = calcularFactorEspecializacion(attrs.vision, attrs.pase);
+    const factorReboteo = calcularFactorEspecializacion(attrs.rebote, attrs.fuerza);
+    const factorRobos = calcularFactorEspecializacion(attrs.robo, attrs.velocidad);
+    const factorTapones = calcularFactorEspecializacion(attrs.tapon, attrs.fuerza);
+
+    const nivelDefensa = ((attrs.robo * 0.5 + attrs.tapon * 0.5) / 20);
 
     let pts = TECHO_PTS * Math.pow(nivelTiro, EXPONENTE_CURVA) * multiplicadorMinutos * factorTiro * modificadorSuerte * ruidoPts;
     let ast = TECHO_AST * Math.pow(nivelPases, EXPONENTE_CURVA) * multiplicadorMinutos * factorPases * modificadorSuerte * ruidoAst;
@@ -778,9 +718,6 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     let stl = TECHO_STL * Math.pow(nivelRobos, EXPONENTE_CURVA) * multiplicadorMinutos * factorRobos * modificadorSuerte * ruidoStl;
     let blk = TECHO_BLK * Math.pow(nivelTapones, EXPONENTE_CURVA) * multiplicadorMinutos * factorTapones * modificadorSuerte * ruidoBlk;
 
-    // 🆕 NUEVO: el enfoque de temporada elegido antes de simular (Modo
-    // Estrella, Cuidar el Cuerpo, Juego de Equipo, Profesional) redistribuye
-    // cómo se traduce tu build en la planilla final.
     const enfoque = obtenerEnfoqueActivo();
     pts *= enfoque.pts;
     ast *= enfoque.ast;
@@ -788,14 +725,14 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     stl *= enfoque.stl;
     blk *= enfoque.blk;
 
+    // 🆕 Techo duro realista: por encima de esto ya es marca histórica única.
+    pts = Math.min(pts, 38);
+
     const ptsPer36 = TECHO_PTS * Math.pow(nivelTiro, EXPONENTE_CURVA) * factorTiro * modificadorSuerte * ruidoPts * enfoque.pts;
     const astPer36 = TECHO_AST * Math.pow(nivelPases, EXPONENTE_CURVA) * factorPases * modificadorSuerte * ruidoAst * enfoque.ast;
     const rebPer36 = TECHO_REB * Math.pow(nivelReboteo, EXPONENTE_CURVA) * factorReboteo * modificadorSuerte * ruidoReb * enfoque.reb;
     const stlPer36 = TECHO_STL * Math.pow(nivelRobos, EXPONENTE_CURVA) * factorRobos * modificadorSuerte * ruidoStl * enfoque.stl;
     const blkPer36 = TECHO_BLK * Math.pow(nivelTapones, EXPONENTE_CURVA) * factorTapones * modificadorSuerte * ruidoBlk * enfoque.blk;
-    // Robos y tapones pesan más "por unidad" en el rendimiento agregado (rango
-    // 0-3 vs 0-34 de puntos), así que se ponderan x4 para que influyan de
-    // verdad en decisiones de corte/retiro y no queden invisibles en la suma.
     const rendimientoPer36 = parseFloat((ptsPer36 + astPer36 + rebPer36 + (stlPer36 + blkPer36) * 4).toFixed(1));
 
     pts = parseFloat(pts.toFixed(1));
@@ -1075,7 +1012,7 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
 
                 const probCampeon = Math.min(0.45, 0.15 + rendimiento / 170);
                 if (Math.random() < probCampeon) {
-                    agregarLogro("Campeón de la NBA 🏆", 2);
+                    agregarLogro("Campeón de la NBA 🏆", 1);
 
                     const probFinalsMVP = rendimientoIndividual >= 38 ? 0.45 : 0.15;
                     if (Math.random() < probFinalsMVP) {
@@ -1089,19 +1026,19 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     if (!esRookie && rendimientoIndividual >= 48) {
         const probMVP = Math.min(0.40, (rendimientoIndividual - 45) / 20);
         if (Math.random() < probMVP) {
-            agregarLogro("MVP de la Temporada 👑", 4);
+            agregarLogro("MVP de la Temporada 👑", 3);
         } else if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
-            agregarLogro("All-NBA Team ⭐", 3);
+            agregarLogro("All-NBA Team ⭐", 2);
         }
     } else if (!esRookie && rendimientoIndividual >= 35) {
         if (Math.random() < Math.min(0.55, (rendimientoIndividual - 30) / 40)) {
-            agregarLogro("All-NBA Team ⭐", 3);
+            agregarLogro("All-NBA Team ⭐", 2);
         }
     }
 
     if (!esRookie && player.minutesPerGame < 20 && rendimientoIndividual >= 15) {
         if (Math.random() < 0.30) {
-            agregarLogro("Sexto Hombre del Año 🎖️", 2);
+            agregarLogro("Sexto Hombre del Año 🎖️", 1);
         }
     }
 
@@ -1109,7 +1046,7 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
         const rendimientoPrevio = historialPrevio.pts + historialPrevio.ast + historialPrevio.reb;
         const huboSaltoGrande = rendimientoPrevio > 0 && rendimientoIndividual >= rendimientoPrevio * 1.35;
         if (huboSaltoGrande && rendimientoIndividual >= 15 && Math.random() < 0.40) {
-            agregarLogro("Most Improved Player 📈", 2);
+            agregarLogro("Most Improved Player 📈", 1);
         }
     }
 
@@ -1127,7 +1064,7 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     if (!esRookie && rendimientoDefensivo >= 18) {
         const probDPOY = Math.min(0.35, (rendimientoDefensivo - 16) * 0.028);
         if (Math.random() < probDPOY) {
-            agregarLogro("Mejor Defensor del Año (DPOY) 🛡️", 3);
+            agregarLogro("Mejor Defensor del Año (DPOY) 🛡️", 2);
         }
     }
 
@@ -1139,7 +1076,7 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     if (!esRookie && rendimientoDefensivo >= 11) {
         const probAllDef = Math.min(0.50, (rendimientoDefensivo - 9) * 0.045);
         if (Math.random() < probAllDef) {
-            agregarLogro("Equipo Defensivo Ideal 🛡️⭐", 2);
+            agregarLogro("Equipo Defensivo Ideal 🛡️⭐", 1);
         }
     }
 
@@ -1183,7 +1120,6 @@ function obtenerPromedioPer36Reciente() {
 // MOTOR DE SIMULACIÓN DE TEMPORADA (AÑO 1)
 // ==========================================
 function iniciarTemporadaUno() {
-    detenerPollingRivalDraft(); // 🆕 ya no hace falta seguir buscando al rival del Draft
     const player = gameState.player;
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
     const calidadEquipo = sortearCalidadEquipo();
@@ -1762,7 +1698,7 @@ function seleccionarEnfoque(key) {
     gameState.player.enfoqueTemporada = key;
 
     document.querySelectorAll(".enfoque-card").forEach(el => el.classList.remove("enfoque-card-activa"));
-    const cardIndex = gameState.player.enfoquesDisponiblesTemporada.indexOf(key);
+    const cardIndex = Object.keys(ENFOQUES_TEMPORADA).indexOf(key);
     const cards = document.querySelectorAll(".enfoque-card");
     if (cards[cardIndex]) cards[cardIndex].classList.add("enfoque-card-activa");
 
@@ -1798,7 +1734,7 @@ function calcularProbabilidadLesion() {
 
     const factorMinutos = player.minutesPerGame / 36; // más cancha, más exposición
     const factorEdad = player.age >= 30 ? 1 + (player.age - 29) * 0.055 : 1.0;
-    const resistenciaFisica = (attrs.fisico + attrs.fuerza) / 30; // 0 (débil) a 1 (fuerte)
+    const resistenciaFisica = (attrs.fisico + attrs.fuerza) / 40; // 0 (débil) a 1 (fuerte)
 // 🆕 antes iba de 1.35 (débil) a 0.70 (fuerte) — el físico casi anulaba
 // el riesgo. Ahora el rango es más angosto, así el enfoque elegido sigue
 // pesando de verdad aunque tengas buen físico/fuerza.
@@ -2049,12 +1985,13 @@ function renderizarEventoHTML(mensajeEvento) {
 function procesarDecliveFisico() {
     const attrs = gameState.attributes;
 
-    attrs.fisico = Math.max(1, attrs.fisico - (Math.floor(Math.random() * 2) + 1));
     attrs.fuerza = Math.max(1, attrs.fuerza - (Math.floor(Math.random() * 2) + 1));
-    attrs.defExt = Math.max(1, attrs.defExt - 1);
+    attrs.velocidad = Math.max(1, attrs.velocidad - (Math.floor(Math.random() * 2) + 1));
+    attrs.resistencia = Math.max(1, attrs.resistencia - 1);
+    attrs.robo = Math.max(1, attrs.robo - 1);
 
     if (Math.random() > 0.8) {
-        attrs.tiroExt = Math.max(1, attrs.tiroExt - 1);
+        attrs.triple = Math.max(1, attrs.triple - 1);
     }
 }
 
@@ -2439,7 +2376,9 @@ document.addEventListener("touchend", (e) => {
 }, { passive: false });
 
 function todosLosAtributosAlTope() {
-    return Object.values(gameState.attributes).every(v => v >= 15);
+    return Object.keys(gameState.attributes).every(attr =>
+        gameState.attributes[attr] >= obtenerTopeAtributo(gameState.player.position, attr)
+    );
 }
 
 function actualizarEstadoBotonConfirmar() {
