@@ -627,15 +627,26 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
     // 🆕 si hay carrera compartida, busca el pick del rival (por si ya
     // drafteó) y actualiza el listado con su nombre insertado.
     if (tieneCarreraCompartida()) {
-        obtenerPickDelRivalCompartido().then(draftInfoRival => {
-            if (!draftInfoRival) return;
+        let intentosDraftRival = 0;
+        const intervaloDraftRival = setInterval(async () => {
+            intentosDraftRival++;
+            const draftInfoRival = await obtenerPickDelRivalCompartido();
             const contenedor = document.getElementById("draft-board-container");
-            if (contenedor) {
+
+            if (draftInfoRival && contenedor) {
                 contenedor.innerHTML = renderizarListaDraftHTML(
                     generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
                 );
+                clearInterval(intervaloDraftRival);
+                return;
             }
-        });
+
+            // Si ya no estamos en la pantalla de Draft, o pasaron demasiados
+            // intentos (2 minutos aprox.), dejamos de preguntar.
+            if (!contenedor || intentosDraftRival >= 24) {
+                clearInterval(intervaloDraftRival);
+            }
+        }, 5000);
     }
 }
 
