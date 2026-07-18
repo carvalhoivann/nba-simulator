@@ -428,7 +428,9 @@ button:focus-visible {
 }
 
 .logros-box.alert-info h3,
-.logros-box.alert-info li {
+.logros-box.alert-info li,
+.logros-box.alert-info p,
+.logros-box.alert-info p strong {
     color: #130f40;
 }
 
@@ -860,4 +862,25 @@ button:focus-visible {
 .draft-pick-rival .draft-pick-nombre {
     color: var(--scoreboard-green);
     font-weight: 600;
+}
+
+/* ==========================================================
+   🆕 NUEVO — ACORDEÓN DE DETALLES DE TEMPORADA
+   Mismo look que draft-board-details, pero contiene las cajas
+   narrativas (calidad de equipo, traspaso, lesión, evento, etc.)
+   ========================================================== */
+.temporada-detalles summary {
+    color: var(--net);
+    font-size: 14px;
+}
+
+.temporada-detalles-contenido {
+    padding: 4px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.temporada-detalles-contenido .status-box {
+    margin-bottom: 0;
 }

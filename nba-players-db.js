@@ -366,18 +366,9 @@ function renderizarRosterEquipoHTML(nombreEquipo) {
 // muestra en pantalla o pasa desapercibido).
 function esTraspasoDeEstrella(traspaso) {
     if (!traspaso) return false;
-    const UMBRAL_ESTRELLA = 150; // ataque + defensa combinados
+    const UMBRAL_ESTRELLA = 135; // ataque + defensa combinados
     const valorQueSeVa = traspaso.jugadorQueSeVa.ataque + traspaso.jugadorQueSeVa.defensa;
     const valorQueLlega = traspaso.jugadorQueLlega.ataque + traspaso.jugadorQueLlega.defensa;
     return valorQueSeVa >= UMBRAL_ESTRELLA || valorQueLlega >= UMBRAL_ESTRELLA;
 }
 
-// 🆕 Determina si un traspaso involucra a una estrella (para decidir si se
-// muestra en pantalla o pasa desapercibido).
-function esTraspasoDeEstrella(traspaso) {
-    if (!traspaso) return false;
-    const UMBRAL_ESTRELLA = 150; // ataque + defensa combinados
-    const valorQueSeVa = traspaso.jugadorQueSeVa.ataque + traspaso.jugadorQueSeVa.defensa;
-    const valorQueLlega = traspaso.jugadorQueLlega.ataque + traspaso.jugadorQueLlega.defensa;
-    return valorQueSeVa >= UMBRAL_ESTRELLA || valorQueLlega >= UMBRAL_ESTRELLA;
-}

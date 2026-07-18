@@ -18,7 +18,8 @@ const gameState = {
         enfoqueTemporada: null, // 🆕 decisión de enfoque elegida para la temporada por jugar
         rivalTeam: null, // 🆕 equipo rival de franquicia asignado al firmar contrato
         rivalRecord: { wins: 0, losses: 0 }, // 🆕 historial de duelos narrativos contra el rival
-        cantidadTraspasosRecibidos: 0 // 🆕 cuenta traspasos que afectaron a TU equipo en la carrera
+        cantidadTraspasosRecibidos: 0, // 🆕 cuenta traspasos que afectaron a TU equipo en la carrera
+        climaVestuario: 60 // 🆕 stat oculta 0-100, arranca neutral-positiva, la mueven los eventos
     },
     // Los 10 atributos obligatorios arrancan en el mínimo (1)
     attributes: {
@@ -177,9 +178,14 @@ function renderizarListaDraftHTML(listaDraft) {
 // como en la realidad. Los puntos de logros/premios se siguen sumando aparte
 // SIEMPRE, incluso en la fase de declive.
 function calcularPuntosBaseDesarrollo(experience) {
-    if (experience <= 3) return 3;   // Años 1-3: desarrollo acelerado de novato
-    if (experience <= 7) return 2;   // Años 4-7: mejoras finas de veterano
-    return 1;                        // Año 8+: el techo natural ya se tocó, pero no en cero
+    let base;
+    if (experience <= 3) base = 3;   // Años 1-3: desarrollo acelerado de novato
+    else if (experience <= 7) base = 2;   // Años 4-7: mejoras finas de veterano
+    else base = 1;                        // Año 8+: el techo natural ya se tocó, pero no en cero
+
+    const rol = obtenerRolActivo();
+    if (rol.bonusDesarrollo) base = Math.round(base * (1 + rol.bonusDesarrollo));
+    return base;
 }
 
 // ==========================================
@@ -252,6 +258,7 @@ async function simularDraft() {
 
     gameState.player.availablePoints = puntosOtorgados;
     gameState.player.minutesPerGame = minutosIniciales;
+    gameState.player.rolEquipo = asignarRolInicialPorPick(pickAleatorio);
 
     // 🆕 guarda tu pick en Firestore para que el otro dispositivo lo vea
     guardarPickPropioCompartido({
@@ -293,6 +300,8 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
     draftScreen.style.display = "block";
     draftScreen.classList.remove("hidden");
 
+    gameState.player.minutosAlArrancarTemporada = minutos;
+    gameState.player.objetivoTemporadaActivo = sortearObjetivoDeTemporada(true);
     draftScreen.innerHTML = `
         <h2>¡Noche del Draft NBA! 🏀</h2>
         <div class="draft-card">
@@ -319,6 +328,7 @@ function mostrarPantallaAsignacion(pick, equipo, puntos, minutos) {
             <!-- Los controlamos en el siguiente paso -->
         </div>
 
+        ${renderizarObjetivoActivoHTML(gameState.player.objetivoTemporadaActivo)}
         ${renderizarSelectorEnfoque()}
 
         <button id="btn-confirmar-atributos" disabled>Confirmar Atributos y Simular Año 1 🚀</button>
@@ -396,6 +406,102 @@ function modificarAtributo(attr, cambio) {
 
     const btnConfirmar = document.getElementById("btn-confirmar-atributos");
     if (btnConfirmar) actualizarEstadoBotonConfirmar();
+}
+
+// ==========================================
+// 🆕 NUEVO: ROLES DENTRO DEL EQUIPO
+// ==========================================
+const ROLES_EQUIPO = {
+    franquicia: {
+        nombre: "Franquicia ⭐⭐", franja: "Estrella",
+        minMin: 34, maxMin: 38,
+        mult: { pts: 1.18, ast: 1.08, reb: 0.95, stl: 0.95, blk: 0.95 },
+        pesoCalidadEquipo: 1.6,
+        premiosBloqueados: [],
+        descripcion: "El equipo se arma alrededor tuyo. Todo el peso ofensivo cae en tus manos."
+    },
+    primeraOpcion: {
+        nombre: "Primera Opción ⭐", franja: "Estrella",
+        minMin: 30, maxMin: 34,
+        mult: { pts: 1.12, ast: 1.0, reb: 0.97, stl: 0.97, blk: 0.97 },
+        pesoCalidadEquipo: 1.3,
+        premiosBloqueados: [],
+        descripcion: "Cargás con el mayor peso ofensivo del plantel."
+    },
+    segundaOpcion: {
+        nombre: "Segunda Opción 🎯", franja: "Titular",
+        minMin: 26, maxMin: 30,
+        mult: { pts: 1.0, ast: 1.0, reb: 1.0, stl: 1.0, blk: 1.0 },
+        pesoCalidadEquipo: 1.0,
+        premiosBloqueados: [],
+        descripcion: "El complemento ideal: buen volumen sin cargar con todo el peso."
+    },
+    motorDeJuego: {
+        nombre: "Motor de Juego 🧠", franja: "Titular",
+        minMin: 26, maxMin: 30,
+        mult: { pts: 0.88, ast: 1.20, reb: 1.0, stl: 1.05, blk: 0.95 },
+        pesoCalidadEquipo: 1.0,
+        premiosBloqueados: [],
+        descripcion: "Titular cuya función es armar juego para el resto, no anotar."
+    },
+    anclaDefensiva: {
+        nombre: "Ancla Defensiva 🛡️", franja: "Titular",
+        minMin: 24, maxMin: 28,
+        mult: { pts: 0.85, ast: 0.95, reb: 1.05, stl: 1.20, blk: 1.20 },
+        pesoCalidadEquipo: 1.0,
+        premiosBloqueados: [],
+        descripcion: "Titular cuya función es defender, no anotar."
+    },
+    sextoHombre: {
+        nombre: "Sexto Hombre de Impacto 🔋", franja: "Banco",
+        minMin: 20, maxMin: 24,
+        mult: { pts: 1.08, ast: 1.08, reb: 1.08, stl: 1.08, blk: 1.08 },
+        pesoCalidadEquipo: 0.6,
+        premiosBloqueados: ["mvp", "allNba"],
+        descripcion: "Entrás desde el banco a cambiar partidos con energía fresca."
+    },
+    especialista: {
+        nombre: "Especialista de Rotación 🧩", franja: "Banco",
+        minMin: 16, maxMin: 20,
+        mult: { pts: 0.90, ast: 0.90, reb: 0.90, stl: 0.90, blk: 0.90 }, // se ajusta con la especialidad elegida
+        pesoCalidadEquipo: 0.4,
+        premiosBloqueados: ["mvp", "allNba", "dpoy", "allDefensive"],
+        descripcion: "Hacés una cosa muy bien y la hacés todo el tiempo."
+    },
+    proyecto: {
+        nombre: "Proyecto a Futuro 🌱", franja: "Marginal",
+        minMin: 8, maxMin: 14,
+        mult: { pts: 0.90, ast: 0.90, reb: 0.90, stl: 0.90, blk: 0.90 },
+        pesoCalidadEquipo: 0.2,
+        premiosBloqueados: ["mvp", "allNba", "dpoy", "allDefensive", "sextoHombre", "mip"],
+        bonusDesarrollo: 0.5, // +50% puntos de entrenamiento
+        descripcion: "Minutos muy bajos, pero el equipo invierte en tu desarrollo."
+    }
+};
+
+function obtenerRolActivo() {
+    const key = gameState.player.rolEquipo;
+    return ROLES_EQUIPO[key] || ROLES_EQUIPO.segundaOpcion;
+}
+
+// Especialidad elegida para el rol "Especialista" (una de: pts, ast, reb, stlblk)
+function aplicarEspecialidadElegida(rol) {
+    if (gameState.player.rolEquipo !== "especialista" || !gameState.player.especialidadElegida) return rol;
+    const especial = { ...rol, mult: { ...rol.mult } };
+    const esp = gameState.player.especialidadElegida;
+    if (esp === "pts") especial.mult.pts = 1.25;
+    else if (esp === "ast") especial.mult.ast = 1.25;
+    else if (esp === "reb") especial.mult.reb = 1.25;
+    else if (esp === "stlblk") { especial.mult.stl = 1.25; especial.mult.blk = 1.25; }
+    return especial;
+}
+
+// Asigna un rol inicial al draftear, según el pick.
+function asignarRolInicialPorPick(pick) {
+    if (pick <= 5) return "primeraOpcion";
+    if (pick <= 20) return "segundaOpcion";
+    if (pick <= 40) return "sextoHombre";
+    return "proyecto";
 }
 
 // ==========================================
@@ -502,6 +608,103 @@ const pesosGRLPorPosicion = {
     }
 };
 
+// ==========================================
+// 🆕 NUEVO: OBJETIVOS DE TEMPORADA
+// ==========================================
+const OBJETIVOS_TEMPORADA = [
+    { id: "pts25", texto: "Anotá 25+ PTS de promedio", puntos: 2,
+      chequear: (res) => res.pts >= 25 },
+    { id: "ast8", texto: "Repartí 8+ AST de promedio", puntos: 2,
+      chequear: (res) => res.ast >= 8 },
+    { id: "reb10", texto: "Capturá 10+ REB de promedio", puntos: 2,
+      chequear: (res) => res.reb >= 10 },
+    { id: "combo45", texto: "Sumá un combinado de 45+ (PTS+AST+REB)", puntos: 2,
+      chequear: (res) => (res.pts + res.ast + res.reb) >= 45 },
+    { id: "stl2", texto: "Conseguí 2+ STL de promedio", puntos: 3,
+      chequear: (res) => res.stl >= 2 },
+    { id: "blk2", texto: "Conseguí 2+ BLK de promedio", puntos: 3,
+      chequear: (res) => res.blk >= 2 },
+    { id: "combodef", texto: "Sumá 3.5+ combinados de STL+BLK", puntos: 3,
+      chequear: (res) => (res.stl + res.blk) >= 3.5 },
+    { id: "playoffs", texto: "Llegá a Playoffs con tu franquicia", puntos: 1,
+      chequear: (res) => res.logros.some(l => l.nombre.includes("Playoffs") || l.nombre.includes("Finalista") || l.nombre.includes("Campeón")) },
+    { id: "serie", texto: "Ganá al menos 1 serie de Playoffs", puntos: 3,
+      chequear: (res) => res.logros.some(l => l.nombre.includes("Finalista de Conferencia") || l.nombre.includes("Finalista de la NBA") || l.nombre.includes("Campeón")) },
+    { id: "sinlesion", texto: "Terminá la temporada sin sufrir ninguna lesión", puntos: 1,
+      chequear: (res) => !res.mensajeLesion },
+    { id: "min30", texto: "Mantené 30+ minutos de promedio en la temporada", puntos: 1,
+      chequear: (res) => res.min >= 30 },
+    { id: "mvpAllNba", texto: "Conseguí una candidatura a MVP o All-NBA", puntos: 5,
+      chequear: (res) => !!(res.candidaturas && (res.candidaturas.mvp || res.candidaturas.allNba)) },
+    { id: "dpoyAllDef", texto: "Conseguí una candidatura a DPOY o Equipo Defensivo", puntos: 5,
+      chequear: (res) => !!(res.candidaturas && (res.candidaturas.dpoy || res.candidaturas.allDefensive)) },
+    { id: "royRookie", texto: "Conseguí ROY o All-Rookie (solo aplica si sos rookie)", puntos: 4,
+      soloRookie: true,
+      chequear: (res) => !!(res.candidaturas && (res.candidaturas.roy || res.candidaturas.allRookie)) },
+    { id: "mejoraPts", texto: "Mejorá tu PTS respecto al año anterior", puntos: 1,
+      requiereHistorial: true,
+      chequear: (res, historialPrevio) => historialPrevio && res.pts > historialPrevio.pts },
+    { id: "masMinutos", texto: "Terminá con más minutos de los que arrancaste la temporada", puntos: 1,
+      chequear: (res, historialPrevio, minutosAlArrancar) => res.min > minutosAlArrancar },
+    { id: "rivalHistorico", texto: "Superá el ritmo de tu rival histórico esta temporada", puntos: 2,
+      chequear: (res) => !!(res.mensajeRivalHistorico && res.mensajeRivalHistorico.includes("superando")) }
+];
+
+// Sortea un objetivo válido para la temporada (evita "royRookie" si no sos
+// rookie, y evita repetir el mismo que el año pasado si hay otras opciones).
+function sortearObjetivoDeTemporada(esRookie) {
+    const anteriorId = gameState.player.objetivoTemporadaAnteriorId;
+    let candidatos = OBJETIVOS_TEMPORADA.filter(o => !o.soloRookie || esRookie);
+    if (candidatos.length > 1) {
+        const sinRepetir = candidatos.filter(o => o.id !== anteriorId);
+        if (sinRepetir.length > 0) candidatos = sinRepetir;
+    }
+    const elegido = candidatos[Math.floor(Math.random() * candidatos.length)];
+    gameState.player.objetivoTemporadaAnteriorId = elegido.id;
+    return elegido;
+}
+
+// Verifica el objetivo activo contra el resultado de la temporada recién
+// jugada y devuelve { cumplido, objetivo } para mostrar en pantalla.
+function verificarObjetivoDeTemporada(resultadoAño) {
+    const objetivo = gameState.player.objetivoTemporadaActivo;
+    if (!objetivo) return null;
+
+    const historial = gameState.statsHistory;
+    const historialPrevio = historial.length >= 2 ? historial[historial.length - 2] : null;
+    const minutosAlArrancar = gameState.player.minutosAlArrancarTemporada || 0;
+
+    const cumplido = objetivo.chequear(resultadoAño, historialPrevio, minutosAlArrancar);
+    return { cumplido, objetivo };
+}
+
+function renderizarObjetivoActivoHTML(objetivo) {
+    if (!objetivo) return "";
+    return `
+        <div class="status-box alert-info logros-box">
+            <h3>🎯 Objetivo de la Temporada</h3>
+            <p>${objetivo.texto} <strong>(+${objetivo.puntos} pts si lo cumplís)</strong></p>
+        </div>
+    `;
+}
+
+function renderizarResultadoObjetivoHTML(resultadoObjetivo) {
+    if (!resultadoObjetivo) return "";
+    const { cumplido, objetivo } = resultadoObjetivo;
+    if (cumplido) {
+        return `
+            <div class="status-box alert-evento">
+                <p>✅ <strong>Objetivo Cumplido:</strong> ${objetivo.texto} — ganaste <strong>${objetivo.puntos} puntos extra</strong>.</p>
+            </div>
+        `;
+    }
+    return `
+        <div class="status-box alert-warning">
+            <p>❌ <strong>Objetivo No Cumplido:</strong> ${objetivo.texto}</p>
+        </div>
+    `;
+}
+
 // 🆕 MEJORA: antes calcularGRL() calculaba el promedio ponderado por posición
 // solo para pintar el número de la tarjeta, y simularAñoDos() calculaba los
 // minutos con un promedio PLANO aparte (sumaAtributos/10). Resultado: a
@@ -522,6 +725,16 @@ function calcularPromedioPonderadoPorPosicion() {
     return promedio;
 }
 
+// 🆕 Detecta si el compañero de partida está en TU MISMO equipo actual.
+// Usa el progreso ya sincronizado (no bloqueante, puede estar un poco viejo).
+function obtenerDatosRivalMismoEquipo() {
+    if (!tieneCarreraCompartida()) return null;
+    const datosRival = gameState.player.progresoRivalCacheado;
+    if (!datosRival || datosRival.isRetired) return null;
+    if (datosRival.team !== gameState.player.currentTeam) return null;
+    return datosRival;
+}
+
 // ==========================================
 // 🆕 MEJORA: MINUTOS DINÁMICOS AÑO A AÑO
 // ==========================================
@@ -538,6 +751,11 @@ function calcularMinutosDelAño(modificadorSuerte) {
 
     const fraccion = (grl - 1) / 19; // 0 (piso) a 1 (techo absoluto)
     let base = 6 + fraccion * 32; // escala continua: 6 a 38 minutos según nivel
+
+    // 🆕 El rol declarado "atrae" los minutos hacia su rango asignado.
+    const rolMin = obtenerRolActivo();
+    const puntoMedioRol = (rolMin.minMin + rolMin.maxMin) / 2;
+    base = base * 0.55 + puntoMedioRol * 0.45; // mezcla: 55% tu nivel real, 45% lo que tu rol dicta
 
     // Ruido normal de un año a otro: competencia en el roster, preferencias
     // del cuerpo técnico, fichajes nuevos que te compiten el puesto, etc.
@@ -571,11 +789,39 @@ function calcularMinutosDelAño(modificadorSuerte) {
         huboRegresion = true;
     }
 
-    const minutos = Math.round(Math.max(4, Math.min(40, base)));
-    return { minutos, huboBreakout, huboRegresion };
+    let minutos = Math.round(Math.max(4, Math.min(40, base)));
+
+    // 🆕 PELEA POR MINUTOS: si tu compañero de partida está en tu mismo equipo,
+    // los minutos de los dos no pueden convivir sin tensión — el que rindió
+    // mejor recientemente se queda con más cancha.
+    const rivalMismoEquipo = obtenerDatosRivalMismoEquipo();
+    let mensajePeleaMinutos = null;
+    if (rivalMismoEquipo) {
+        const miRendimientoReciente = gameState.statsHistory.length > 0
+            ? gameState.statsHistory[gameState.statsHistory.length - 1].rendimientoPer36 : 15;
+        const rendimientoRival = rivalMismoEquipo.rendimientoPer36 || 15;
+        const TECHO_COMBINADO = 62; // los dos no pueden sumar más de esto en minutos
+
+        const totalDeseado = minutos + (rivalMismoEquipo.minutesPerGame || minutos);
+        if (totalDeseado > TECHO_COMBINADO) {
+            const proporcionPropia = miRendimientoReciente / (miRendimientoReciente + rendimientoRival || 1);
+            const minutosAjustados = Math.round(TECHO_COMBINADO * proporcionPropia);
+            if (minutosAjustados < minutos) {
+                mensajePeleaMinutos = `⚔️ Compartís roster con ${rivalMismoEquipo.firstName} — el cuerpo técnico repartió minutos entre los dos, y esta vez cediste algo de cancha.`;
+            } else {
+                mensajePeleaMinutos = `⚔️ Compartís roster con ${rivalMismoEquipo.firstName} — te ganaste la pelea por minutos esta temporada.`;
+            }
+            minutos = Math.max(4, Math.min(40, minutosAjustados));
+        }
+    }
+
+    return { minutos, huboBreakout, huboRegresion, mensajePeleaMinutos };
 }
 
-function renderizarMensajeMinutosHTML(huboBreakout, huboRegresion, minutosNuevos) {
+function renderizarMensajeMinutosHTML(huboBreakout, huboRegresion, minutosNuevos, mensajePeleaMinutos) {
+    if (mensajePeleaMinutos) {
+        return `<div class="status-box alert-equipo"><p>${mensajePeleaMinutos} Terminaste con <strong>${minutosNuevos} minutos</strong> por partido.</p></div>`;
+    }
     if (huboBreakout) {
         return `<div class="status-box alert-evento"><p>📈 <strong>¡Diste el salto!</strong> El cuerpo técnico te subió en la rotación: ahora vas a jugar cerca de <strong>${minutosNuevos} minutos</strong> por partido.</p></div>`;
     }
@@ -630,7 +876,7 @@ function renderizarTarjetaJugador() {
         <div class="player-card">
             <div>
                 <p class="player-card-name">${player.firstName} ${player.lastName}</p>
-                <p class="player-card-meta">${player.position || "Sin posición"} · ${player.currentTeam}</p>
+                <p class="player-card-meta">${player.position || "Sin posición"} · ${player.currentTeam} · ${obtenerRolActivo().nombre}${player.climaVestuario >= 80 ? " · 🔥 Líder del vestuario" : player.climaVestuario <= 30 ? " · ⚠️ Tensión en el vestuario" : ""}</p>
                 <div class="player-card-details">
                     <span>Edad: <strong>${player.age}</strong></span>
                     <span>Temporada: <strong>${player.experience}</strong></span>
@@ -751,7 +997,7 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     const factorRobos = calcularFactorEspecializacion(attrs.robo, attrs.velocidad);
     const factorTapones = calcularFactorEspecializacion(attrs.tapon, attrs.fuerza);
 
-    const nivelDefensa = ((attrs.robo * 0.5 + attrs.tapon * 0.5) / 20);
+    const nivelDefensa = ((attrs.robo * 0.5 + attrs.tapon * 0.5) / 20) * multiplicadorMinutos * modificadorSuerte;
 
     let pts = TECHO_PTS * Math.pow(nivelTiro, EXPONENTE_CURVA) * multiplicadorMinutos * factorTiro * modificadorSuerte * ruidoPts;
     let ast = TECHO_AST * Math.pow(nivelPases, EXPONENTE_CURVA) * multiplicadorMinutos * factorPases * modificadorSuerte * ruidoAst;
@@ -760,20 +1006,25 @@ function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     let blk = TECHO_BLK * Math.pow(nivelTapones, EXPONENTE_CURVA) * multiplicadorMinutos * factorTapones * modificadorSuerte * ruidoBlk;
 
     const enfoque = obtenerEnfoqueActivo();
-    pts *= enfoque.pts;
-    ast *= enfoque.ast;
-    reb *= enfoque.reb;
-    stl *= enfoque.stl;
-    blk *= enfoque.blk;
+    const rolActivo = aplicarEspecialidadElegida(obtenerRolActivo());
+    pts *= enfoque.pts * rolActivo.mult.pts;
+    ast *= enfoque.ast * rolActivo.mult.ast;
+    reb *= enfoque.reb * rolActivo.mult.reb;
+    stl *= enfoque.stl * rolActivo.mult.stl;
+    blk *= enfoque.blk * rolActivo.mult.blk;
 
     // 🆕 Techo duro realista: por encima de esto ya es marca histórica única.
     pts = Math.min(pts, 38);
+    ast = Math.min(ast, 15);
+    reb = Math.min(reb, 18);
+    stl = Math.min(stl, 4.5);
+    blk = Math.min(blk, 4.5);
 
-    const ptsPer36 = TECHO_PTS * Math.pow(nivelTiro, EXPONENTE_CURVA) * factorTiro * modificadorSuerte * ruidoPts * enfoque.pts;
-    const astPer36 = TECHO_AST * Math.pow(nivelPases, EXPONENTE_CURVA) * factorPases * modificadorSuerte * ruidoAst * enfoque.ast;
-    const rebPer36 = TECHO_REB * Math.pow(nivelReboteo, EXPONENTE_CURVA) * factorReboteo * modificadorSuerte * ruidoReb * enfoque.reb;
-    const stlPer36 = TECHO_STL * Math.pow(nivelRobos, EXPONENTE_CURVA) * factorRobos * modificadorSuerte * ruidoStl * enfoque.stl;
-    const blkPer36 = TECHO_BLK * Math.pow(nivelTapones, EXPONENTE_CURVA) * factorTapones * modificadorSuerte * ruidoBlk * enfoque.blk;
+    const ptsPer36 = TECHO_PTS * Math.pow(nivelTiro, EXPONENTE_CURVA) * factorTiro * modificadorSuerte * ruidoPts * enfoque.pts * rolActivo.mult.pts;
+    const astPer36 = TECHO_AST * Math.pow(nivelPases, EXPONENTE_CURVA) * factorPases * modificadorSuerte * ruidoAst * enfoque.ast * rolActivo.mult.ast;
+    const rebPer36 = TECHO_REB * Math.pow(nivelReboteo, EXPONENTE_CURVA) * factorReboteo * modificadorSuerte * ruidoReb * enfoque.reb * rolActivo.mult.reb;
+    const stlPer36 = TECHO_STL * Math.pow(nivelRobos, EXPONENTE_CURVA) * factorRobos * modificadorSuerte * ruidoStl * enfoque.stl * rolActivo.mult.stl;
+    const blkPer36 = TECHO_BLK * Math.pow(nivelTapones, EXPONENTE_CURVA) * factorTapones * modificadorSuerte * ruidoBlk * enfoque.blk * rolActivo.mult.blk;
     const rendimientoPer36 = parseFloat((ptsPer36 + astPer36 + rebPer36 + (stlPer36 + blkPer36) * 4).toFixed(1));
 
     pts = parseFloat(pts.toFixed(1));
@@ -837,32 +1088,79 @@ const CALIDADES_EQUIPO = [
 // Contendiente/Superequipo más seguido; uno flojo va a tender a
 // Reconstrucción/Mediocre. Sigue habiendo azar real (un equipo fuerte
 // puede tener un año gris, y viceversa), solo se inclina la balanza.
-function sortearCalidadEquipo() {
+// 🆕 Suma/resta clima de vestuario, con clamp entre 0 y 100.
+function ajustarClimaVestuario(delta) {
+    const player = gameState.player;
+    player.climaVestuario = Math.max(0, Math.min(100, (player.climaVestuario ?? 60) + delta));
+}
+
+async function sortearCalidadEquipo() {
+    // 🆕 si compartís equipo con tu compañero de partida, la calidad del
+    // roster tiene que ser LA MISMA para los dos — no puede ser "Superequipo"
+    // para uno y "Reconstrucción" para el otro, es el mismo plantel.
+    if (tieneCarreraCompartida()) {
+        const yaCompartida = await obtenerCalidadEquipoCompartidaDelAño();
+        if (yaCompartida) return yaCompartida;
+    }
+
     const fuerza = typeof calcularFuerzaRealDeEquipo === "function"
         ? calcularFuerzaRealDeEquipo(gameState.player.currentTeam)
         : { ataque: 65, defensa: 65 };
 
-    const nivelEquipo = (fuerza.ataque + fuerza.defensa) / 2; // ~55 a ~92 en la práctica
-    // Normalizamos a un rango -1 (equipo flojo) a +1 (equipo de elite)
-    const nivelNormalizado = Math.max(-1, Math.min(1, (nivelEquipo - 68) / 18));
+    const nivelEquipo = (fuerza.ataque + fuerza.defensa) / 2;
+    let nivelNormalizado = Math.max(-1, Math.min(1, (nivelEquipo - 68) / 18));
+    const clima = gameState.player.climaVestuario ?? 60;
+    const empujeClima = ((clima - 60) / 40) * 0.15;
+    nivelNormalizado = Math.max(-1, Math.min(1, nivelNormalizado + empujeClima));
 
-    // Cada tier tiene un "índice de jerarquía" (0 = Reconstrucción, 4 = Superequipo).
-    // Mientras más lejos esté el tier del nivel real del equipo, más se penaliza
-    // su peso; mientras más cerca, más se lo favorece.
     const pesosAjustados = CALIDADES_EQUIPO.map((tier, indice) => {
-        const indiceObjetivo = 2 + nivelNormalizado * 2; // 0 a 4, centrado según nivel real
+        const indiceObjetivo = 2 + nivelNormalizado * 2;
         const distancia = Math.abs(indice - indiceObjetivo);
-        const factor = Math.max(0.15, 1.6 - distancia * 0.5); // nunca en 0: siempre hay chance de sorpresa
+        const factor = Math.max(0.15, 1.6 - distancia * 0.5);
         return { tier, pesoFinal: tier.probPeso * factor };
     });
 
     const pesoTotal = pesosAjustados.reduce((acc, t) => acc + t.pesoFinal, 0);
     let dado = Math.random() * pesoTotal;
+    let resultado = CALIDADES_EQUIPO[CALIDADES_EQUIPO.length - 1];
     for (const item of pesosAjustados) {
-        if (dado < item.pesoFinal) return item.tier;
+        if (dado < item.pesoFinal) { resultado = item.tier; break; }
         dado -= item.pesoFinal;
     }
-    return CALIDADES_EQUIPO[CALIDADES_EQUIPO.length - 1];
+
+    if (tieneCarreraCompartida()) await guardarCalidadEquipoCompartidaDelAño(resultado);
+    return resultado;
+}
+
+// 🆕 Guarda/lee la calidad de equipo del año, keyed por equipo+temporada propia,
+// solo relevante si el rival está en el MISMO equipo esa misma temporada.
+async function guardarCalidadEquipoCompartidaDelAño(calidad) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const campo = `calidadEquipoCompartida_${gameState.player.currentTeam}_year${gameState.player.experience + 1}`;
+        await setDoc(refPartida, { [campo]: calidad }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar la calidad de equipo compartida:", e);
+    }
+}
+
+async function obtenerCalidadEquipoCompartidaDelAño() {
+    if (!tieneCarreraCompartida()) return null;
+    const rivalMismoEquipo = obtenerDatosRivalMismoEquipo();
+    if (!rivalMismoEquipo) return null; // no comparten equipo, cada uno tira lo suyo
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+        const campo = `calidadEquipoCompartida_${gameState.player.currentTeam}_year${gameState.player.experience + 1}`;
+        return snap.data()[campo] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar la calidad de equipo compartida:", e);
+        return null;
+    }
 }
 
 // 🆕 Límites de traspasos por carrera: nunca menos de MIN, nunca más de MAX.
@@ -886,6 +1184,36 @@ function intentarTraspasoDeLaTemporada() {
 
     if (traspaso) player.cantidadTraspasosRecibidos++;
     return traspaso;
+}
+
+// 🆕 Agrupa todas las cajas narrativas/contextuales de la temporada en un
+// solo acordeón colapsable, para no apilar 5-6 cajas sueltas del mismo estilo.
+function renderizarDetallesTemporadaHTML(res) {
+    const partes = [
+        renderizarCalidadEquipoHTML(res.calidadEquipo),
+        renderizarTraspasoHTML(res.traspaso),
+        renderizarLesionHTML(res.mensajeLesion),
+        renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min, res.mensajePeleaMinutos),
+        renderizarEventoHTML(res.mensajeEvento)
+    ].filter(html => html && html.trim() !== "");
+
+    if (partes.length === 0) return "";
+
+    return `
+        <details class="draft-board-details temporada-detalles">
+            <summary>📋 Detalles de la temporada (${partes.length})</summary>
+            <div class="temporada-detalles-contenido">
+                ${partes.join("")}
+            </div>
+        </details>
+    `;
+}
+
+// 🆕 caja de aviso — solo se genera HTML si el traspaso involucra una estrella.
+// 🆕 caja de aviso con la calidad de roster sorteada para la temporada.
+function renderizarCalidadEquipoHTML(calidadEquipo) {
+    if (!calidadEquipo) return "";
+    return `<div class="status-box alert-equipo"><p><strong>${calidadEquipo.nombre}</strong> — ${calidadEquipo.mensaje}</p></div>`;
 }
 
 // 🆕 caja de aviso — solo se genera HTML si el traspaso involucra una estrella.
@@ -1174,6 +1502,7 @@ function renderizarRivalHistoricoHTML(mensaje) {
 // el compañero. El que tenga mejor puntaje entre los candidatos se lo lleva.
 function calcularCandidaturasPremios(pts, ast, reb, stl, blk, yearNumero, impactoDefensivo) {
     const player = gameState.player;
+    const rolPremios = obtenerRolActivo();
     const rendimientoIndividual = pts + ast + reb + (impactoDefensivo * 15);
     const rendimientoDefensivo = (stl * 8) + (blk * 8) + (impactoDefensivo * 25);
     const esRookie = yearNumero === 1;
@@ -1229,6 +1558,8 @@ function calcularCandidaturasPremios(pts, ast, reb, stl, blk, yearNumero, impact
         if (Math.random() < probAllDef) candidaturas.allDefensive = true;
     }
 
+    // 🆕 tu rol declarado puede bloquear ciertos premios (ej: un Especialista no compite por MVP).
+    (rolPremios.premiosBloqueados || []).forEach(key => { candidaturas[key] = false; });
     return { candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie };
 }
 
@@ -1268,7 +1599,8 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     const player = gameState.player;
     const rendimientoIndividual = pts + ast + reb + (impactoDefensivo * 15);
     const bonusEquipo = calidadEquipo ? calidadEquipo.bonusRendimiento : 0;
-    const rendimiento = Math.max(0, rendimientoIndividual + bonusEquipo);
+    const pesoRol = obtenerRolActivo().pesoCalidadEquipo || 1.0;
+    const rendimiento = Math.max(0, (rendimientoIndividual * pesoRol) + bonusEquipo);
 
     const logros = [];
     let bonus = 0;
@@ -1285,9 +1617,13 @@ function calcularLogrosDeTemporada(pts, ast, reb, stl, blk, yearNumero, impactoD
     else if (rendimiento >= 28) probPlayoffs = 0.55;
     else if (rendimiento >= 15) probPlayoffs = 0.30;
     else probPlayoffs = 0.10;
-
+    const rivalMismoEquipoLogros = obtenerDatosRivalMismoEquipo();
     if (Math.random() < probPlayoffs) {
-        agregarLogro("Clasificación a Playoffs 🎟️", 1);
+        if (rivalMismoEquipoLogros) {
+            agregarLogro(`Clasificación a Playoffs 🎟️ (junto a ${rivalMismoEquipoLogros.firstName} 🤝)`, 1);
+        } else {
+            agregarLogro("Clasificación a Playoffs 🎟️", 1);
+        }
 
         const probConferencia = Math.min(0.55, 0.25 + rendimiento / 130);
         if (Math.random() < probConferencia) {
@@ -1365,10 +1701,10 @@ function obtenerPromedioPer36Reciente() {
 // ==========================================
 // MOTOR DE SIMULACIÓN DE TEMPORADA (AÑO 1)
 // ==========================================
-function iniciarTemporadaUno() {
+async function iniciarTemporadaUno() {
     const player = gameState.player;
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
-    const calidadEquipo = sortearCalidadEquipo();
+    const calidadEquipo = await sortearCalidadEquipo();
     const traspaso = intentarTraspasoDeLaTemporada();
     if (traspaso) {
         if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
@@ -1410,10 +1746,13 @@ function iniciarTemporadaUno() {
     player.age++;
     player.experience++;
 
+    resultadoAño.resultadoObjetivo = verificarObjetivoDeTemporada(resultadoAño);
     manejarEventoYFinalizar(
         resultadoAño,
         (bonusExtra) => {
-            player.availablePoints = Math.max(0, calcularPuntosBaseDesarrollo(player.experience) + bonus + bonusExtra);
+            const puntosObjetivo = (resultadoAño.resultadoObjetivo && resultadoAño.resultadoObjetivo.cumplido)
+                ? resultadoAño.resultadoObjetivo.objetivo.puntos : 0;
+            player.availablePoints = Math.max(0, calcularPuntosBaseDesarrollo(player.experience) + bonus + bonusExtra + puntosObjetivo);
         },
         mostrarResultadosTemporada
     );
@@ -1436,12 +1775,7 @@ function mostrarResultadosTemporada(res) {
     seasonScreen.innerHTML = `
         ${renderizarTarjetaJugador()}
         <h2>Resultados de la Temporada (Año ${res.year})</h2>
-        <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
-        <p><strong>Contexto del año:</strong> ${res.tipoAzar}</p>
-        ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
-        ${renderizarTraspasoHTML(res.traspaso)}
-        ${renderizarLesionHTML(res.mensajeLesion)}
-        ${renderizarEventoHTML(res.mensajeEvento)}
+        <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años | <strong>Contexto:</strong> ${res.tipoAzar}</p>
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1452,7 +1786,9 @@ function mostrarResultadosTemporada(res) {
             <div class="stat-box"><p>BLK</p><h3>${res.blk}</h3></div>
         </div>
 
+        ${renderizarResultadoObjetivoHTML(res.resultadoObjetivo)}
         ${renderizarLogrosHTML(res.logros)}
+        ${renderizarDetallesTemporadaHTML(res)}
 
         <div class="status-box">
             <p><strong>Contrato Restante:</strong> Queda ${gameState.player.contractYearsLeft} año obligatorio en este equipo.</p>
@@ -1460,6 +1796,7 @@ function mostrarResultadosTemporada(res) {
         </div>
 
         <button onclick="irAEntrenamientoAñoDos()">Ir a entrenar para el Año 2 🏋️‍♂️</button>
+        ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
     sincronizarCarreraCompartida();
@@ -1473,6 +1810,8 @@ function irAEntrenamientoAñoDos() {
 
     gameState.player.enfoqueTemporada = null;
     gameState.player.enfoquesDisponiblesTemporada = null; // 🆕 vuelve a sortear opciones nuevas
+    gameState.player.minutosAlArrancarTemporada = gameState.player.minutesPerGame;
+    gameState.player.objetivoTemporadaActivo = sortearObjetivoDeTemporada(gameState.player.experience === 1);
 
     document.getElementById("season-screen").classList.add("hidden");
     // ...el resto queda igual...
@@ -1494,6 +1833,7 @@ function irAEntrenamientoAñoDos() {
             <!-- JavaScript vuelve a dibujar las barritas con los valores actuales -->
         </div>
 
+        ${renderizarObjetivoActivoHTML(gameState.player.objetivoTemporadaActivo)}
         ${renderizarSelectorEnfoque()}
 
         <button id="btn-confirmar-atributos" disabled>Confirmar Mejora y Simular Año ${gameState.player.experience + 1} 🚀</button>
@@ -1510,14 +1850,14 @@ function irAEntrenamientoAñoDos() {
 // ==========================================
 // MOTOR DE SIMULACIÓN: TEMPORADA (AÑO 2)
 // ==========================================
-function simularAñoDos() {
+async function simularAñoDos() {
     const player = gameState.player;
 
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
-    const { minutos, huboBreakout, huboRegresion } = calcularMinutosDelAño(modificadorSuerte);
+    const { minutos, huboBreakout, huboRegresion, mensajePeleaMinutos } = calcularMinutosDelAño(modificadorSuerte);
     player.minutesPerGame = minutos;
 
-    const calidadEquipo = sortearCalidadEquipo();
+    const calidadEquipo = await sortearCalidadEquipo();
     const traspaso = intentarTraspasoDeLaTemporada();
     if (traspaso) {
         if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
@@ -1546,6 +1886,7 @@ function simularAñoDos() {
         rendimientoPer36,
         huboBreakout,      // 🆕
         huboRegresion,      // 🆕
+        mensajePeleaMinutos, // 🆕
         logros,
         rendimientoPer36,
         candidaturas,          // 🆕
@@ -1560,10 +1901,13 @@ function simularAñoDos() {
     player.age++;
     player.experience++;
 
+    resultadoAño.resultadoObjetivo = verificarObjetivoDeTemporada(resultadoAño);
     manejarEventoYFinalizar(
         resultadoAño,
         (bonusExtra) => {
-            player.availablePoints = Math.max(0, calcularPuntosBaseDesarrollo(player.experience) + bonus + bonusExtra);
+            const puntosObjetivo = (resultadoAño.resultadoObjetivo && resultadoAño.resultadoObjetivo.cumplido)
+                ? resultadoAño.resultadoObjetivo.objetivo.puntos : 0;
+            player.availablePoints = Math.max(0, calcularPuntosBaseDesarrollo(player.experience) + bonus + bonusExtra + puntosObjetivo);
         },
         mostrarResultadosAñoDos
     );
@@ -1580,13 +1924,7 @@ function mostrarResultadosAñoDos(res) {
     seasonScreen.innerHTML = `
         ${renderizarTarjetaJugador()}
         <h2>Resultados de la Temporada (Año ${res.year})</h2>
-        <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
-        <p><strong>Contexto del año:</strong> ${res.tipoAzar}</p>
-        ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
-        ${renderizarTraspasoHTML(res.traspaso)}
-        ${renderizarLesionHTML(res.mensajeLesion)}
-        ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
-        ${renderizarEventoHTML(res.mensajeEvento)}
+        <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años | <strong>Contexto:</strong> ${res.tipoAzar}</p>
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -1597,7 +1935,9 @@ function mostrarResultadosAñoDos(res) {
             <div class="stat-box"><p>BLK</p><h3>${res.blk}</h3></div>
         </div>
 
+        ${renderizarResultadoObjetivoHTML(res.resultadoObjetivo)}
         ${renderizarLogrosHTML(res.logros)}
+        ${renderizarDetallesTemporadaHTML(res)}
 
         <div class="status-box alert-warning">
             <h3>⚠️ ¡CONTRATO DE NOVATO VENCIDO! ⚠️</h3>
@@ -1605,6 +1945,7 @@ function mostrarResultadosAñoDos(res) {
         </div>
 
         <button onclick="procesarAgenciaLibreOGameOver()">Ir a la Oficina: Ver ofertas o Retiro 💼</button>
+        ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
     sincronizarCarreraCompartida();
@@ -1625,6 +1966,34 @@ function generarOfertasAgenciaLibre(rendimientoCombinado) {
         tier = { cantidadOfertas: 2, minAños: 1, maxAños: 2, esEstrella: false };
     }
 
+    // 🆕 según qué tan bien rendiste vs. lo que tu rol actual esperaba, definimos
+    // si merecés subir, mantener o bajar de franja.
+    const promedioReciente = obtenerPromedioPer36Reciente();
+    let franjaSugerida; // "alta", "media", "baja"
+    if (promedioReciente >= 26) franjaSugerida = "alta";
+    else if (promedioReciente >= 14) franjaSugerida = "media";
+    else franjaSugerida = "baja";
+
+    // 🆕 elige un rol de oferta según la fuerza real del roster de ESE equipo:
+    // equipos débiles ofrecen roles de franja alta, equipos fuertes ofrecen roles bajos/medios.
+    function sugerirRolParaEquipo(equipo) {
+        const fuerza = typeof calcularFuerzaRealDeEquipo === "function"
+            ? calcularFuerzaRealDeEquipo(equipo)
+            : { ataque: 65, defensa: 65 };
+        const nivelEquipo = (fuerza.ataque + fuerza.defensa) / 2;
+
+        const rolesAlta = ["franquicia", "primeraOpcion"];
+        const rolesMedia = ["segundaOpcion", "motorDeJuego", "anclaDefensiva"];
+        const rolesBaja = ["sextoHombre", "especialista"];
+
+        let pool;
+        if (nivelEquipo <= 65) pool = franjaSugerida === "alta" ? rolesAlta : rolesMedia;
+        else if (nivelEquipo <= 78) pool = franjaSugerida === "baja" ? rolesBaja : rolesMedia;
+        else pool = franjaSugerida === "alta" ? rolesMedia : rolesBaja;
+
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
     const equiposDisponibles = nbaTeams.filter(t => t !== player.currentTeam);
     const equiposSorteados = [];
     const copiaDisponibles = [...equiposDisponibles];
@@ -1643,12 +2012,14 @@ function generarOfertasAgenciaLibre(rendimientoCombinado) {
         const añosRenovacion = tier.esEstrella
             ? tier.maxAños
             : Math.floor(Math.random() * (tier.maxAños - tier.minAños + 1)) + tier.minAños;
+        const rolOferta = sugerirRolParaEquipo(player.currentTeam);
+        const nombreRol = ROLES_EQUIPO[rolOferta].nombre;
 
         ofertasHTML += `
             <div class="oferta-card ${tier.esEstrella ? "estrella" : ""}">
                 <h3>${tier.esEstrella ? "🔥 Renovación Máxima" : "🔄 Renovar"} - ${player.currentTeam}</h3>
-                <p>Te ofrecen ${añosRenovacion} año(s) de contrato para seguir en la franquicia.</p>
-                <button onclick="aceptarContrato('${player.currentTeam}', ${añosRenovacion})">Aceptar Renovación</button>
+                <p>Te ofrecen ${añosRenovacion} año(s) de contrato como <strong>${nombreRol}</strong>.</p>
+                <button onclick="aceptarContrato('${player.currentTeam}', ${añosRenovacion}, '${rolOferta}')">Aceptar Renovación</button>
             </div>
         `;
     }
@@ -1656,22 +2027,26 @@ function generarOfertasAgenciaLibre(rendimientoCombinado) {
     equiposSorteados.forEach(equipo => {
         const años = Math.floor(Math.random() * (tier.maxAños - tier.minAños + 1)) + tier.minAños;
         const etiqueta = tier.esEstrella ? "⭐ Oferta de Agente Libre" : "💼 Oferta de Mercado";
+        const rolOferta = sugerirRolParaEquipo(equipo);
+        const nombreRol = ROLES_EQUIPO[rolOferta].nombre;
         ofertasHTML += `
             <div class="oferta-card">
                 <h3>${etiqueta} - ${equipo}</h3>
-                <p>Te ofrecen ${años} año(s) de contrato.</p>
-                <button onclick="aceptarContrato('${equipo}', ${años})">Firmar con ${equipo}</button>
+                <p>Te ofrecen ${años} año(s) de contrato como <strong>${nombreRol}</strong>.</p>
+                <button onclick="aceptarContrato('${equipo}', ${años}, '${rolOferta}')">Firmar con ${equipo}</button>
             </div>
         `;
     });
 
     if (!equipoActualRenueva && equiposSorteados.length < 1) {
         const equipoRescate = equiposDisponibles[Math.floor(Math.random() * equiposDisponibles.length)];
+        const rolOferta = sugerirRolParaEquipo(equipoRescate);
+        const nombreRol = ROLES_EQUIPO[rolOferta].nombre;
         ofertasHTML += `
             <div class="oferta-card">
                 <h3>💼 Oferta de Mercado - ${equipoRescate}</h3>
-                <p>Te ofrecen 1 año de contrato buscando profundidad en el banco.</p>
-                <button onclick="aceptarContrato('${equipoRescate}', 1)">Firmar con ${equipoRescate}</button>
+                <p>Te ofrecen 1 año de contrato como <strong>${nombreRol}</strong>, buscando profundidad en el banco.</p>
+                <button onclick="aceptarContrato('${equipoRescate}', 1, '${rolOferta}')">Firmar con ${equipoRescate}</button>
             </div>
         `;
     }
@@ -1740,12 +2115,14 @@ function procesarAgenciaLibreOGameOver() {
 // ==========================================
 // FUNCIÓN AUXILIAR: PROCESAR EL CONTRATO ELEGIDO
 // ==========================================
-function aceptarContrato(equipo, años) {
+function aceptarContrato(equipo, años, rol) {
     if (gameState.player.isRetired) return; // 🆕 FIX: no firmar contratos post-retiro
 
     const cambioDeEquipo = gameState.player.currentTeam !== equipo;
     gameState.player.currentTeam = equipo;
     gameState.player.contractYearsLeft = años;
+    gameState.player.rolEquipo = rol || "segundaOpcion"; // 🆕
+    gameState.player.especialidadElegida = null; // 🆕 se re-elige si el rol es "especialista"
 
     // 🆕 nueva franquicia, nueva rivalidad — el rival de tu equipo anterior
     // no te sigue si te vas a jugar a otro lado.
@@ -1753,17 +2130,42 @@ function aceptarContrato(equipo, años) {
 
     document.getElementById("office-screen").classList.add("hidden");
 
-    if (gameState.player.availablePoints > 0) {
-        irAEntrenamientoAñoDos();
-    } else {
-        simularSiguienteAño();
+    if (rol === "especialista") {
+        mostrarPantallaElegirEspecialidad();
+        return;
     }
+
+    irAEntrenamientoAñoDos();
+}
+
+// 🆕 Pantalla para elegir en qué stat especializarse si te tocó el rol Especialista.
+function mostrarPantallaElegirEspecialidad() {
+    let screen = document.getElementById("office-screen");
+    screen.classList.remove("hidden");
+    screen.innerHTML = `
+        <h2>🧩 Elegí tu Especialidad</h2>
+        <div class="status-box">
+            <p>Firmaste como Especialista de Rotación. Elegí en qué faceta del juego vas a destacarte por sobre el resto.</p>
+        </div>
+        <div class="contenedor-ofertas">
+            <div class="oferta-card"><h3>Anotador 🎯</h3><p>+25% de bonus a tus puntos.</p><button onclick="confirmarEspecialidad('pts')">Elegir</button></div>
+            <div class="oferta-card"><h3>Pasador 🧠</h3><p>+25% de bonus a tus asistencias.</p><button onclick="confirmarEspecialidad('ast')">Elegir</button></div>
+            <div class="oferta-card"><h3>Reboteador 🧱</h3><p>+25% de bonus a tus rebotes.</p><button onclick="confirmarEspecialidad('reb')">Elegir</button></div>
+            <div class="oferta-card"><h3>Defensor 🛡️</h3><p>+25% de bonus a robos y tapones.</p><button onclick="confirmarEspecialidad('stlblk')">Elegir</button></div>
+        </div>
+    `;
+}
+
+function confirmarEspecialidad(especialidad) {
+    gameState.player.especialidadElegida = especialidad;
+    document.getElementById("office-screen").classList.add("hidden");
+    irAEntrenamientoAñoDos();
 }
 
 // ==========================================
 // BUCLE GENERAL DE CARRERA (AÑO 3 EN ADELANTE)
 // ==========================================
-function simularSiguienteAño() {
+async function simularSiguienteAño() {
     const player = gameState.player;
     if (player.isRetired) return; // 🆕 FIX: no simular más temporadas post-retiro
 
@@ -1789,10 +2191,10 @@ function simularSiguienteAño() {
     }
 
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
-    const { minutos, huboBreakout, huboRegresion } = calcularMinutosDelAño(modificadorSuerte);
+    const { minutos, huboBreakout, huboRegresion, mensajePeleaMinutos } = calcularMinutosDelAño(modificadorSuerte);
     player.minutesPerGame = minutos;
 
-    const calidadEquipo = sortearCalidadEquipo();
+    const calidadEquipo = await sortearCalidadEquipo();
     const traspaso = intentarTraspasoDeLaTemporada();
     if (traspaso) {
         if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
@@ -1835,13 +2237,16 @@ function simularSiguienteAño() {
         return;
     }
 
+    resultadoAño.resultadoObjetivo = verificarObjetivoDeTemporada(resultadoAño);
     manejarEventoYFinalizar(
         resultadoAño,
         (bonusExtra) => {
             const base = (player.declineAge === null || player.age < player.declineAge)
                 ? calcularPuntosBaseDesarrollo(player.experience)
                 : 0;
-            player.availablePoints = Math.max(0, base + bonus + bonusExtra);
+            const puntosObjetivo = (resultadoAño.resultadoObjetivo && resultadoAño.resultadoObjetivo.cumplido)
+                ? resultadoAño.resultadoObjetivo.objetivo.puntos : 0;
+            player.availablePoints = Math.max(0, base + bonus + bonusExtra + puntosObjetivo);
         },
         mostrarPantallaBucleCarrera
     );
@@ -2144,38 +2549,237 @@ function calcularEstadisticasConLesion(modificadorSuerte, tipoAño) {
 // dentro de la cancha (roces, química de equipo) y fuera de ella (prensa,
 // sponsors, vida personal).
 const EVENTOS_AUTOMATICOS = [
-    { categoria: "cancha", mensaje: "🔥 Hiciste buena onda con un compañero clave y la química del equipo te sumó en la cancha.", bonusExtra: 1 },
-    { categoria: "cancha", mensaje: "😤 Un cruce con el entrenador por minutos te tuvo un poco distraído parte del año.", bonusExtra: -1 },
-    { categoria: "cancha", mensaje: "🤝 Un veterano del plantel te tomó como discípulo y te ayudó a pulir detalles de tu juego.", bonusExtra: 2 },
-    { categoria: "fueraCancha", mensaje: "📸 Una marca deportiva te sumó a una campaña menor — más exposición, algo de presión extra.", bonusExtra: 1 },
-    { categoria: "fueraCancha", mensaje: "📰 Unas declaraciones tuyas se malinterpretaron en la prensa y armaron un quilombo corto.", bonusExtra: -1 },
-    { categoria: "fueraCancha", mensaje: "✈️ Un viaje familiar te desconcentró un poco antes de un tramo importante de la temporada.", bonusExtra: -1 },
-    { categoria: "cancha", mensaje: "🎯 El cuerpo técnico destacó tu profesionalismo en los entrenamientos frente a todo el plantel.", bonusExtra: 1 }
+    // ---- Cancha: química positiva ----
+    { categoria: "cancha", mensaje: "🔥 Hiciste buena onda con un compañero clave y la química del equipo te sumó en la cancha.", bonusExtra: 1, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "🤝 Un veterano del plantel te tomó como discípulo y te ayudó a pulir detalles de tu juego.", bonusExtra: 2, climaExtra: 5 },
+    { categoria: "cancha", mensaje: "🎯 El cuerpo técnico destacó tu profesionalismo en los entrenamientos frente a todo el plantel.", bonusExtra: 1, climaExtra: 3 },
+    { categoria: "cancha", mensaje: "🎉 Organizaste una cena de equipo que ayudó a soldar el grupo antes de un tramo difícil del calendario.", bonusExtra: 0, climaExtra: 6 },
+    { categoria: "cancha", mensaje: "🙌 Le diste una mano a un novato del plantel que venía perdido — el vestuario lo valoró.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "💪 Te quedaste después del entrenamiento ayudando a un compañero con su tiro — se corrió la voz en el vestuario.", bonusExtra: 1, climaExtra: 3 },
+    { categoria: "cancha", mensaje: "🌟 Marcaste el tanto de la victoria en un partido y el estadio coreó tu nombre.", bonusExtra: 2, climaExtra: 3 },
+    { categoria: "cancha", mensaje: "📈 Estudiaste el video de tu próximo rival y alertaste a tus compañeros de una debilidad clave.", bonusExtra: 2, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "🛡️ Te pusiste al frente en una jugada dividida peligrosa, ganándote el respeto total de los defensores.", bonusExtra: 1, climaExtra: 5 },
+    { categoria: "cancha", mensaje: "🤝 Fuiste el primero en levantar a un compañero que había caído al piso tras una falta.", bonusExtra: 0, climaExtra: 3 },
+    { categoria: "cancha", mensaje: "⚡ Demostraste una intensidad física en el entrenamiento que contagió energía a todo el equipo.", bonusExtra: 1, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "🎙️ En la charla técnica, hiciste una autocrítica constructiva que unió más al plantel.", bonusExtra: 0, climaExtra: 5 },
+    { categoria: "cancha", mensaje: "🎁 Diste una asistencia perfecta, priorizando el beneficio común.", bonusExtra: 1, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "🎖️ El capitán te felicitó públicamente por tu sacrificio defensivo en los últimos partidos.", bonusExtra: 1, climaExtra: 5 },
+    { categoria: "cancha", mensaje: "🧘 Ayudaste a un compañero a manejar los nervios antes de un partido definitorio con un consejo simple.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "cancha", mensaje: "🔋 Tu rendimiento físico subió un escalón y el preparador físico lo usó como ejemplo para los demás.", bonusExtra: 2, climaExtra: 3 },
+
+    // ---- Cancha: fricción negativa ----
+    { categoria: "cancha", mensaje: "😤 Un cruce con el entrenador por minutos te tuvo un poco distraído parte del año.", bonusExtra: -1, climaExtra: -4 },
+    { categoria: "cancha", mensaje: "🗣️ Te agarraste una discusión fuerte con un compañero en pleno entrenamiento por una jugada.", bonusExtra: 0, climaExtra: -6 },
+    { categoria: "cancha", mensaje: "😒 Un compañero se quejó públicamente de que acaparás demasiado la pelota.", bonusExtra: 0, climaExtra: -5 },
+    { categoria: "cancha", mensaje: "🚫 Llegaste tarde a un entrenamiento clave y el cuerpo técnico te llamó la atención delante de todos.", bonusExtra: -1, climaExtra: -5 },
+    { categoria: "cancha", mensaje: "🧊 Sentiste que el grupo te dejó un poco de lado después de una mala racha de resultados.", bonusExtra: 0, climaExtra: -3 },
+    { categoria: "cancha", mensaje: "⚠️ Te perdiste una marca clave en el clutch y el profe te recriminó fuertemente.", bonusExtra: -1, climaExtra: -4 },
+    { categoria: "cancha", mensaje: "🌡️ Jugaste un partido visiblemente desganado y el público local empezó a murmurar contra vos.", bonusExtra: -2, climaExtra: -6 },
+    { categoria: "cancha", mensaje: "🛑 Fuiste expulsado de manera irresponsable, dejando a tu equipo con diez hombres.", bonusExtra: -2, climaExtra: -8 },
+    { categoria: "cancha", mensaje: "🚧 Tu falta de entendimiento táctico con el lateral provocó un desorden defensivo evidente.", bonusExtra: -1, climaExtra: -3 },
+    { categoria: "cancha", mensaje: "🤐 Ignoraste una instrucción directa del entrenador durante el partido, generando un momento tenso.", bonusExtra: -1, climaExtra: -5 },
+    { categoria: "cancha", mensaje: "📉 Entraste en una racha de fallos inexplicables que empezaron a generar murmullos en la tribuna.", bonusExtra: -1, climaExtra: -4 },
+    { categoria: "cancha", mensaje: "😠 Te descubrieron una cuenta falsa de X donde hablas mal de tus compañeros.", bonusExtra: -1, climaExtra: -6 },
+    { categoria: "cancha", mensaje: "📉 Se filtró que estás bajo de forma física y la prensa empezó a cuestionar tu contrato.", bonusExtra: -1, climaExtra: -3 },
+    { categoria: "cancha", mensaje: "👥 Te comiste a la mujer de tu compañero y se enteró todo el vestuario.", bonusExtra: 0, climaExtra: -7 },
+    { categoria: "cancha", mensaje: "⚖️ Se notó una diferencia abismal entre tu juego defensivo y ofensivo, creando dudas en el cuerpo técnico.", bonusExtra: -1, climaExtra: -2 },
+
+    // ---- Fuera de cancha: positivos ----
+    { categoria: "fueraCancha", mensaje: "📸 Una marca deportiva te sumó a una campaña menor — más exposición, algo de presión extra.", bonusExtra: 1, climaExtra: 1 },
+    { categoria: "fueraCancha", mensaje: "🎂 Organizaste el cumpleaños de un compañero y el gesto cayó muy bien en el plantel.", bonusExtra: 0, climaExtra: 5 },
+    { categoria: "fueraCancha", mensaje: "🏡 Invitaste a varios compañeros a tu casa en un día libre — el grupo se llevó una buena tarde.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "fueraCancha", mensaje: "📰 Elogiaste públicamente a tus compañeros en una entrevista, y ellos lo agradecieron.", bonusExtra: 0, climaExtra: 3 },
+    { categoria: "fueraCancha", mensaje: "🚗 Le diste un aventón seguido a un compañero sin auto — un gesto chico que se valoró en el grupo.", bonusExtra: 0, climaExtra: 3 },
+    { categoria: "fueraCancha", mensaje: "🎓 Terminaste un curso de capacitación o carrera corta, demostrando madurez fuera del fútbol.", bonusExtra: 1, climaExtra: 2 },
+    { categoria: "fueraCancha", mensaje: "🏥 Visitaste a un compañero lesionado en el hospital, un gesto que el vestuario valoró mucho.", bonusExtra: 0, climaExtra: 6 },
+    { categoria: "fueraCancha", mensaje: "👕 Hiciste una donación importante de equipamiento para las divisiones inferiores del club.", bonusExtra: 1, climaExtra: 5 },
+    { categoria: "fueraCancha", mensaje: "🤝 Actuaste como mediador en un conflicto menor entre dos compañeros, evitando que pase a mayores.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "fueraCancha", mensaje: "🍽️ Pagaste una cena de equipo inesperada después de una victoria importante.", bonusExtra: 0, climaExtra: 5 },
+    { categoria: "fueraCancha", mensaje: "🎤 Participaste en un evento benéfico local, dejando muy bien parada la imagen del plantel.", bonusExtra: 1, climaExtra: 3 },
+    { categoria: "fueraCancha", mensaje: "🎮 Armaste un grupo de juego online para los más jóvenes, integrándolos rápidamente al grupo.", bonusExtra: 0, climaExtra: 3 },
+    { categoria: "fueraCancha", mensaje: "📦 Ayudaste a un compañero nuevo a mudarse a su departamento apenas llegó a la ciudad.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "fueraCancha", mensaje: "💡 Tuviste un gesto de humildad al reconocer tu error ante un veterano, ganando su respeto.", bonusExtra: 0, climaExtra: 4 },
+    { categoria: "fueraCancha", mensaje: "✈️ Gestionaste la logística de viaje de un compañero que tenía problemas personales, siendo un salvavidas.", bonusExtra: 0, climaExtra: 5 },
+
+    // ---- Fuera de cancha: negativos ----
+    { categoria: "fueraCancha", mensaje: "📰 Unas declaraciones tuyas se malinterpretaron en la prensa y armaron un quilombo corto.", bonusExtra: -1, climaExtra: -4 },
+    { categoria: "fueraCancha", mensaje: "✈️ Un viaje familiar te desconcentró un poco antes de un tramo importante de la temporada.", bonusExtra: -1, climaExtra: 0 },
+    { categoria: "fueraCancha", mensaje: "🎧 Te vieron mucho tiempo con auriculares puestos, ignorando charlas de grupo — algunos lo tomaron como soberbia.", bonusExtra: 0, climaExtra: -3 },
+    { categoria: "fueraCancha", mensaje: "💸 Un compañero se enteró que ganás bastante más que él y hubo un poco de tensión incómoda.", bonusExtra: 0, climaExtra: -2 },
+    { categoria: "fueraCancha", mensaje: "📸 Te vieron en un boliche hasta tarde un día antes de un partido, la prensa no perdonó.", bonusExtra: -2, climaExtra: -7 },
+    { categoria: "fueraCancha", mensaje: "📱 Publicaste una foto polémica en redes sociales que involucraba a compañeros sin permiso.", bonusExtra: -1, climaExtra: -5 },
+    { categoria: "fueraCancha", mensaje: "🚗 Tuviste un incidente de tránsito menor que salió en los portales de chimentos.", bonusExtra: 0, climaExtra: -3 },
+    { categoria: "fueraCancha", mensaje: "🏠 Hubo una queja de los vecinos de tu edificio por ruidos molestos en una reunión tuya.", bonusExtra: 0, climaExtra: -2 },
+    { categoria: "fueraCancha", mensaje: "💬 Se rumorea en el vestuario que sos quien filtra información a los periodistas.", bonusExtra: -1, climaExtra: -6 },
+    { categoria: "fueraCancha", mensaje: "👟 Rechazaste firmar autógrafos a un grupo de chicos a la salida del predio, se viralizó en Twitter.", bonusExtra: 0, climaExtra: -4 },
+    { categoria: "fueraCancha", mensaje: "📉 Faltaste a un evento de patrocinio obligatorio del club por un olvido personal.", bonusExtra: -1, climaExtra: -3 },
+    { categoria: "fueraCancha", mensaje: "🙊 Comentaste algo privado de un compañero que terminó llegando a oídos de todo el equipo.", bonusExtra: 0, climaExtra: -5 },
+    { categoria: "fueraCancha", mensaje: "💸 Te vieron gastando cifras excesivas en un momento de crisis del club, la hinchada está molesta.", bonusExtra: 0, climaExtra: -4 },
+    { categoria: "fueraCancha", mensaje: "📵 Te aislaste del grupo en el hotel de concentración, negándote a compartir tiempo común.", bonusExtra: 0, climaExtra: -3 }
 ];
 
 const EVENTOS_DECISION = [
+    // ---- Tus 10 originales ----
     {
         categoria: "fueraCancha",
         narrativa: "Una marca de indumentaria te ofrece un contrato de auspicio. Es plata y exposición, pero te va a robar tiempo de entrenamiento.",
         opciones: [
-            { label: "Firmar el contrato 💰", resultadoTexto: "Firmaste el auspicio: sumaste plata y fama, pero le restaste horas al gimnasio.", bonusExtra: -1 },
-            { label: "Rechazar y enfocarte en el juego 🏀", resultadoTexto: "Rechazaste la oferta para no distraerte — el cuerpo técnico valoró tu compromiso.", bonusExtra: 1 }
+            { label: "Firmar el contrato 💰", resultadoTexto: "Firmaste el auspicio: sumaste plata y fama, pero le restaste horas al gimnasio.", bonusExtra: -1, climaExtra: 0 },
+            { label: "Rechazar y enfocarte en el juego 🏀", resultadoTexto: "Rechazaste la oferta para no distraerte — el cuerpo técnico valoró tu compromiso.", bonusExtra: 1, climaExtra: 1 }
         ]
     },
     {
         categoria: "cancha",
         narrativa: "El entrenador te da a elegir: liderar vos los entrenamientos extra del equipo, o entrenar solo a tu ritmo.",
         opciones: [
-            { label: "Liderar al equipo 👥", resultadoTexto: "Te pusiste al hombro los entrenamientos extra — el grupo te lo agradeció.", bonusExtra: 1 },
-            { label: "Entrenar a tu ritmo 🧘", resultadoTexto: "Preferiste tu rutina personal, más efectiva para vos individualmente.", bonusExtra: 2 }
+            { label: "Liderar al equipo 👥", resultadoTexto: "Te pusiste al hombro los entrenamientos extra — el grupo te lo agradeció.", bonusExtra: 1, climaExtra: 6 },
+            { label: "Entrenar a tu ritmo 🧘", resultadoTexto: "Preferiste tu rutina personal, más efectiva para vos individualmente.", bonusExtra: 2, climaExtra: -2 }
         ]
     },
     {
         categoria: "fueraCancha",
         narrativa: "Te invitan a dar una charla motivacional en tu ciudad natal, justo en medio de la pretemporada.",
         opciones: [
-            { label: "Ir a la charla 🎤", resultadoTexto: "Fuiste a devolverle algo a tu gente — te costó una semana de pretemporada intensiva.", bonusExtra: -1 },
-            { label: "Rechazar y quedarte entrenando 💪", resultadoTexto: "Preferiste no distraerte de la pretemporada.", bonusExtra: 1 }
+            { label: "Ir a la charla 🎤", resultadoTexto: "Fuiste a devolverle algo a tu gente — te costó una semana de pretemporada intensiva.", bonusExtra: -1, climaExtra: 0 },
+            { label: "Rechazar y quedarte entrenando 💪", resultadoTexto: "Preferiste no distraerte de la pretemporada.", bonusExtra: 1, climaExtra: 0 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "Dos compañeros del plantel están en conflicto por minutos y te piden que actúes de mediador.",
+        opciones: [
+            { label: "Meterte a mediar 🤝", resultadoTexto: "Ayudaste a destrabar el conflicto — el grupo respiró más tranquilo.", bonusExtra: 0, climaExtra: 7 },
+            { label: "No meterte, no es tu problema 🙅", resultadoTexto: "Preferiste no involucrarte — el conflicto se resolvió solo, pero quedó un poco de resquemor.", bonusExtra: 0, climaExtra: -3 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "El equipo organiza una actividad de bonding (día de pesca, torneo de la consola, etc.) el mismo día que tenías planeada una sesión extra en el gimnasio.",
+        opciones: [
+            { label: "Ir a la actividad de equipo 🎮", resultadoTexto: "Te sumaste al plan grupal — nada mejor para el clima del vestuario.", bonusExtra: 0, climaExtra: 5 },
+            { label: "Quedarte entrenando solo 🏋️", resultadoTexto: "Preferiste seguir puliendo tu juego — el cuerpo lo agradece, el grupo un poco menos.", bonusExtra: 1, climaExtra: -3 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "El cuerpo técnico te pregunta tu opinión sobre sacar del roster a un compañero que rinde poco pero es muy querido en el vestuario.",
+        opciones: [
+            { label: "Recomendar que se quede 🛡️", resultadoTexto: "Defendiste a tu compañero frente al cuerpo técnico — el vestuario lo supo y te lo agradeció.", bonusExtra: 0, climaExtra: 6 },
+            { label: "Ser honesto sobre su bajo rendimiento 📋", resultadoTexto: "Diste tu opinión sincera — el cuerpo técnico lo valoró, aunque no cayó igual de bien en el vestuario.", bonusExtra: 1, climaExtra: -5 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Un canal de streaming te ofrece hacer una serie documental sobre tu temporada, con cámaras siguiéndote incluso en el vestuario.",
+        opciones: [
+            { label: "Aceptar el documental 🎥", resultadoTexto: "Aceptaste la exposición — algunos compañeros se sintieron incómodos con las cámaras cerca.", bonusExtra: 2, climaExtra: -4 },
+            { label: "Rechazar, cuidar la privacidad del grupo 🔒", resultadoTexto: "Rechazaste la oferta para no invadir la intimidad del vestuario.", bonusExtra: 0, climaExtra: 3 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "En medio de una racha de derrotas, el capitán del equipo te pide que ayudes a levantar el ánimo del grupo en una charla.",
+        opciones: [
+            { label: "Dar la cara y hablarle al equipo 🗣️", resultadoTexto: "Diste una charla sincera al grupo — se notó el efecto en la semana siguiente.", bonusExtra: 0, climaExtra: 8 },
+            { label: "Preferir liderar con el ejemplo, no con palabras 🤐", resultadoTexto: "Elegiste liderar en silencio, dejando que otros hablen — funcionó, aunque menos.", bonusExtra: 1, climaExtra: 2 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Se filtra a la prensa que pediste ser cambiado de equipo hace un tiempo. Los compañeros lo leyeron y hay tensión.",
+        opciones: [
+            { label: "Aclarar la situación con el grupo cara a cara 💬", resultadoTexto: "Hablaste con el plantel y bajaste la tensión — no fue fácil, pero funcionó.", bonusExtra: 0, climaExtra: 2 },
+            { label: "Ignorar el tema y seguir como si nada 🤷", resultadoTexto: "Preferiste no darle entidad al rumor — el silencio se sintió raro en el vestuario.", bonusExtra: 0, climaExtra: -6 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "Un rookie del plantel te pide consejos todo el tiempo, incluso te llama fuera de horario de entrenamiento.",
+        opciones: [
+            { label: "Hacerte tiempo para guiarlo 🌱", resultadoTexto: "Te tomaste el trabajo de ser mentor — el rookie y el resto del plantel lo valoraron mucho.", bonusExtra: 0, climaExtra: 6 },
+            { label: "Poner un límite claro, necesitás tu espacio 🚧", resultadoTexto: "Le pusiste un límite sano — entendió, aunque quedó un poco frío el trato.", bonusExtra: 1, climaExtra: -2 }
+        ]
+    },
+
+    // ---- Mis 10 nuevos ----
+    {
+        categoria: "cancha",
+        narrativa: "El entrenador te pide que sacrifiques tu posición habitual para jugar en una posición que no te gusta pero que el equipo necesita.",
+        opciones: [
+            { label: "Aceptar el desafío 🔄", resultadoTexto: "Te adaptaste — el entrenador valoró tu versatilidad y el equipo ganó.", bonusExtra: 1, climaExtra: 5 },
+            { label: "Negarte y pedir tu posición 🎯", resultadoTexto: "Priorizaste tu juego — el entrenador quedó molesto por tu falta de flexibilidad.", bonusExtra: 2, climaExtra: -4 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "Durante un entrenamiento, un compañero juega de forma muy agresiva y peligrosa.",
+        opciones: [
+            { label: "Pedirle que baje un cambio 🛑", resultadoTexto: "Evitaste una lesión y pusiste orden.", bonusExtra: 0, climaExtra: 3 },
+            { label: "Responder con la misma intensidad 🥊", resultadoTexto: "Demostraste carácter, pero el ambiente se volvió hostil.", bonusExtra: 1, climaExtra: -5 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "Se presenta una oportunidad de practicar una jugada de riesgo que podría definir partidos.",
+        opciones: [
+            { label: "Dedicar tiempo extra a pulirla 🛠️", resultadoTexto: "La jugada salió perfecta en el próximo partido — héroe del día.", bonusExtra: 2, climaExtra: 3 },
+            { label: "Mantener el entrenamiento estándar 🛡️", resultadoTexto: "Jugaste a lo seguro — el cuerpo técnico notó tu falta de ambición.", bonusExtra: 0, climaExtra: -2 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "El preparador físico te propone un plan de dieta estricto que afectaría tu vida social.",
+        opciones: [
+            { label: "Seguir el plan al pie de la letra 🥗", resultadoTexto: "Tu nivel físico subió notablemente.", bonusExtra: 3, climaExtra: -3 },
+            { label: "Flexibilizar la dieta 🍕", resultadoTexto: "Mantuviste tu equilibrio personal, pero tu rendimiento físico no dio ese salto.", bonusExtra: 0, climaExtra: 2 }
+        ]
+    },
+    {
+        categoria: "cancha",
+        narrativa: "Un jugador rival te busca constantemente con provocaciones para hacerte perder los estribos.",
+        opciones: [
+            { label: "Mantener la calma 🧘", resultadoTexto: "Tu temple ayudó a que el equipo no cayera en la trampa — el capitán te elogió.", bonusExtra: 1, climaExtra: 4 },
+            { label: "Responder a la provocación 🗣️", resultadoTexto: "Perdiste el foco y recibiste una amarilla innecesaria.", bonusExtra: -1, climaExtra: -6 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Un amigo de la infancia quiere venir a quedarse a tu casa durante un tramo importante de la temporada.",
+        opciones: [
+            { label: "Alojalo en casa 🏠", resultadoTexto: "Fue un gran apoyo emocional, aunque perdiste horas de descanso.", bonusExtra: 0, climaExtra: 2 },
+            { label: "Pedirle que venga después ✋", resultadoTexto: "Priorizaste tu descanso y enfoque profesional.", bonusExtra: 1, climaExtra: -1 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Te ofrecen ir a un podcast popular, pero coincide con tu siesta obligatoria de día de partido.",
+        opciones: [
+            { label: "Ir al podcast 🎙️", resultadoTexto: "Ganaste popularidad, pero llegaste al partido con poca energía.", bonusExtra: 1, climaExtra: -3 },
+            { label: "Priorizar el descanso 💤", resultadoTexto: "Llegaste al 100% — el cuerpo técnico valoró tu profesionalismo.", bonusExtra: 1, climaExtra: 1 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Un compañero te pide un préstamo importante y sospechas que es para apuestas.",
+        opciones: [
+            { label: "Prestarle el dinero 💸", resultadoTexto: "El gesto estrechó la relación, pero te preocupa su hábito.", bonusExtra: 0, climaExtra: 4 },
+            { label: "Rechazar y ser honesto 🚫", resultadoTexto: "Marcaste un límite — la relación se enfrió, pero actuaste con responsabilidad.", bonusExtra: 1, climaExtra: -3 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Te invitan a una fiesta exclusiva con rumores de prensa sensacionalista cerca.",
+        opciones: [
+            { label: "Ir con perfil bajo 🕶️", resultadoTexto: "La pasaste bien sin escándalos — ganaste contactos valiosos.", bonusExtra: 1, climaExtra: 2 },
+            { label: "No ir por precaución 🏠", resultadoTexto: "Evitaste cualquier riesgo de manchar tu reputación.", bonusExtra: 0, climaExtra: 3 }
+        ]
+    },
+    {
+        categoria: "fueraCancha",
+        narrativa: "Un familiar tiene un problema de salud menor y te pide que lo acompañes al médico en tu día libre.",
+        opciones: [
+            { label: "Acompañarlo 🏥", resultadoTexto: "Familia agradecida, recargaste pilas emocionalmente.", bonusExtra: 0, climaExtra: 5 },
+            { label: "Quedarte descansando 🛋️", resultadoTexto: "Aprovechaste el día para recuperación total — renovado físicamente.", bonusExtra: 1, climaExtra: 0 }
         ]
     }
 ];
@@ -2183,7 +2787,7 @@ const EVENTOS_DECISION = [
 // 🆕 ~28% de chance de evento por temporada, 65% automático / 35% con
 // elección, para que aparezcan de vez en cuando y no todos los años.
 function procesarEventoDeTemporada() {
-    if (Math.random() >= 0.28) return null;
+    if (Math.random() >= 0.40) return null;
 
     if (Math.random() < 0.65) {
         const evento = EVENTOS_AUTOMATICOS[Math.floor(Math.random() * EVENTOS_AUTOMATICOS.length)];
@@ -2221,6 +2825,7 @@ function manejarEventoYFinalizar(resultadoAño, aplicarPuntosFinal, mostrarFn) {
 
     if (evento.tipo === "automatico") {
         resultadoAño.mensajeEvento = evento.mensaje;
+        if (evento.climaExtra) ajustarClimaVestuario(evento.climaExtra);
         finalizarFlujo(evento.bonusExtra);
         return;
     }
@@ -2262,6 +2867,7 @@ function mostrarPantallaEventoDecision(evento, resultadoAño, aplicarPuntosFinal
         const btn = eventoScreen.querySelector(`[data-opcion="${i}"]`);
         btn.onclick = () => {
             resultadoAño.mensajeEvento = opcion.resultadoTexto;
+            if (opcion.climaExtra) ajustarClimaVestuario(opcion.climaExtra);
             aplicarPuntosFinal(opcion.bonusExtra);
             eventoScreen.classList.add("hidden");
             mostrarFn(resultadoAño);
@@ -2393,13 +2999,7 @@ function mostrarPantallaBucleCarrera(res) {
     seasonScreen.innerHTML = `
         ${renderizarTarjetaJugador()}
         <h2>Temporada Finalizada (Año ${res.year})</h2>
-        <p><strong>Equipo actual:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
-        <p><strong>Rendimiento del año:</strong> ${res.tipoAzar}</p>
-        ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
-        ${renderizarTraspasoHTML(res.traspaso)}
-        ${renderizarLesionHTML(res.mensajeLesion)}
-        ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
-        ${renderizarEventoHTML(res.mensajeEvento)}
+        <p><strong>Equipo actual:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años | <strong>Rendimiento:</strong> ${res.tipoAzar}</p>
 
         <div class="stats-grid">
             <div class="stat-box"><p>MIN</p><h3>${res.min}</h3></div>
@@ -2410,10 +3010,12 @@ function mostrarPantallaBucleCarrera(res) {
             <div class="stat-box"><p>BLK</p><h3>${res.blk}</h3></div>
         </div>
 
+        ${renderizarResultadoObjetivoHTML(res.resultadoObjetivo)}
         ${renderizarLogrosHTML(res.logros)}
-
+        ${renderizarDetallesTemporadaHTML(res)}
 
         ${seccionAcciones}
+        ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
     sincronizarCarreraCompartida();
@@ -2421,12 +3023,7 @@ function mostrarPantallaBucleCarrera(res) {
 
 function avanzarProximaTemporada() {
     if (gameState.player.isRetired) return; // 🆕 FIX: no simular más temporadas post-retiro
-
-    if (gameState.player.availablePoints > 0) {
-        irAEntrenamientoAñoDos();
-    } else {
-        simularSiguienteAño();
-    }
+    irAEntrenamientoAñoDos();
 }
 
 // ==========================================
@@ -2829,6 +3426,7 @@ async function sincronizarCarreraCompartida() {
     if (!tieneCarreraCompartida()) return;
 
     guardarProgresoCompartido(); // no bloqueante, no hace falta esperar
+    gameState.player.progresoRivalCacheado = await obtenerProgresoDelRivalCompartido(); // 🆕 cachea para pelea por minutos
     await sincronizarTraspasosCompartidos(); // 🆕 trae los traspasos del rival antes de refrescar la UI
 
     const actualizar = async () => {
@@ -2849,6 +3447,78 @@ async function sincronizarCarreraCompartida() {
 
     if (intervaloProgresoRival) clearInterval(intervaloProgresoRival);
     intervaloProgresoRival = setInterval(actualizar, 6000);
+}
+
+// 🆕 NUEVO: RÉCORDS DE LA PARTIDA COMPARTIDA
+// Compara TODAS las temporadas de los dos jugadores (guardadas en
+// ceremonia_year{N}_{slot}) y encuentra quién hizo más de cada stat
+// en una sola temporada, dentro de esta partida.
+async function obtenerRecordsDeLaPartida() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+
+        const data = snap.data();
+        const stats = ["pts", "ast", "reb", "stl", "blk"];
+        const records = {};
+
+        stats.forEach(stat => { records[stat] = { valor: -1, nombre: null, year: null }; });
+
+        Object.keys(data).forEach(campo => {
+            if (!campo.startsWith("ceremonia_year")) return;
+            const resultado = data[campo];
+            const esPropio = campo.endsWith(`_${gameState.player.slotPropio}`);
+            const nombreJugador = esPropio
+                ? `${gameState.player.firstName} ${gameState.player.lastName}`
+                : (resultado.nombreJugador || "Rival");
+
+            stats.forEach(stat => {
+                if (resultado[stat] > records[stat].valor) {
+                    records[stat] = { valor: resultado[stat], nombre: nombreJugador, year: resultado.year };
+                }
+            });
+        });
+
+        return records;
+    } catch (e) {
+        console.warn("No se pudo consultar los récords de la partida:", e);
+        return null;
+    }
+}
+
+function renderizarRecordsPartidaHTML(records) {
+    if (!records) {
+        return `<p class="career-no-trophies">Todavía no hay suficientes datos para calcular récords de la partida.</p>`;
+    }
+    const etiquetas = { pts: "PTS", ast: "AST", reb: "REB", stl: "STL", blk: "BLK" };
+    const filas = Object.keys(records).map(stat => {
+        const r = records[stat];
+        if (!r.nombre) return "";
+        return `<li>${etiquetas[stat]}: <strong>${r.valor}</strong> — ${r.nombre} (Año ${r.year})</li>`;
+    }).join("");
+    return `<ul class="career-trophy-list">${filas}</ul>`;
+}
+
+async function mostrarRecordsPartida() {
+    let recordsScreen = document.getElementById("records-partida-screen");
+    if (!recordsScreen) {
+        recordsScreen = document.createElement("section");
+        recordsScreen.id = "records-partida-screen";
+        document.getElementById("game-container").appendChild(recordsScreen);
+    }
+    recordsScreen.classList.remove("hidden");
+    recordsScreen.innerHTML = `<h2>🔥 Récords de la Partida</h2><p>Cargando...</p>`;
+
+    const records = await obtenerRecordsDeLaPartida();
+    recordsScreen.innerHTML = `
+        <h2>🔥 Récords de la Partida</h2>
+        <p>Comparación entre vos y tu compañero de partida, en todas las temporadas jugadas hasta ahora.</p>
+        ${renderizarRecordsPartidaHTML(records)}
+        <button onclick="document.getElementById('records-partida-screen').classList.add('hidden')">Cerrar</button>
+    `;
 }
 
 // ==========================================
