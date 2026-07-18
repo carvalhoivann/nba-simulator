@@ -48,6 +48,65 @@ const nbaTeams = [
 ];
 
 // ==========================================
+// 🆕 FALTABAN: PICK DE DRAFT COMPARTIDO
+// ==========================================
+async function guardarPickPropioCompartido(datosPick) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const campo = `draft_${gameState.player.slotPropio}`;
+        await setDoc(refPartida, { [campo]: datosPick }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el pick de Draft compartido:", e);
+    }
+}
+
+async function obtenerPickDelRivalCompartido() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+
+        const data = snap.data();
+        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
+        return data[`draft_${slotRival}`] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el pick del rival compartido:", e);
+        return null;
+    }
+}
+
+let intervaloDraftRival = null;
+
+function iniciarPollingRivalDraft(pick, equipo) {
+    if (!tieneCarreraCompartida()) return;
+    detenerPollingRivalDraft();
+
+    intervaloDraftRival = setInterval(async () => {
+        const draftInfoRival = await obtenerPickDelRivalCompartido();
+        if (!draftInfoRival) return;
+
+        const contenedor = document.getElementById("draft-board-container");
+        if (contenedor) {
+            contenedor.innerHTML = renderizarListaDraftHTML(
+                generarListaDraftCompleta(pick, `${gameState.player.firstName} ${gameState.player.lastName}`, equipo, gameState.player.position, draftInfoRival)
+            );
+        }
+        detenerPollingRivalDraft();
+    }, 5000);
+}
+
+function detenerPollingRivalDraft() {
+    if (intervaloDraftRival) {
+        clearInterval(intervaloDraftRival);
+        intervaloDraftRival = null;
+    }
+}
+
+// ==========================================
 // 🆕 NUEVO: LISTADO COMPLETO DEL DRAFT (60 picks)
 // ==========================================
 // Pool de nombres genéricos para generar los otros 59 draftees (tu jugador
