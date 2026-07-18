@@ -218,6 +218,7 @@ button {
     cursor: pointer;
     transition: background-color 0.15s ease, transform 0.1s ease;
     touch-action: manipulation; /* 🆕 evita el zoom por doble-tap en mobile */
+
 }
 
 button:hover:not(:disabled) {
@@ -249,7 +250,8 @@ button:focus-visible {
     font-size: 20px;
     line-height: 1;
     flex-shrink: 0;
-    touch-action: manipulation; /* 🆕 explícito, no depender de herencia */
+    touch-action: manipulation;
+
 }
 
 /* ==========================================================
@@ -777,4 +779,85 @@ button:focus-visible {
         transition: none !important;
         animation: none !important;
     }
+}
+
+/* ==========================================================
+   🆕 NUEVO — LISTADO COMPLETO DEL DRAFT (60 picks)
+   ========================================================== */
+.draft-board-details {
+    margin: 16px 0 20px;
+    background: var(--court-raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px 4px 4px;
+}
+
+.draft-board-details summary {
+    cursor: pointer;
+    padding: 12px 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    list-style: none;
+}
+
+.draft-board-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.draft-board-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 8px 8px;
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.draft-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.draft-pick-num {
+    font-family: var(--font-mono);
+    color: var(--muted);
+    min-width: 34px;
+}
+
+.draft-pick-equipo {
+    color: var(--muted);
+    min-width: 110px;
+    flex-shrink: 0;
+}
+
+.draft-pick-nombre {
+    color: var(--net);
+}
+
+.draft-pick-propio {
+    background: linear-gradient(180deg, rgba(226, 105, 27, 0.14), transparent);
+    border-left: 3px solid var(--hardwood);
+}
+
+.draft-pick-propio .draft-pick-nombre {
+    color: var(--hardwood);
+    font-weight: 600;
+}
+
+.draft-pick-rival {
+    background: linear-gradient(180deg, rgba(53, 166, 103, 0.14), transparent);
+    border-left: 3px solid var(--scoreboard-green);
+}
+
+.draft-pick-rival .draft-pick-nombre {
+    color: var(--scoreboard-green);
+    font-weight: 600;
 }
