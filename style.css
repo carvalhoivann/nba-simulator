@@ -30,6 +30,7 @@
 
 * {
     box-sizing: border-box;
+    touch-action: manipulation; /* 🆕 evita zoom por doble-tap en toda la página */
 }
 
 html {
