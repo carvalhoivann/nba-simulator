@@ -1762,7 +1762,7 @@ function seleccionarEnfoque(key) {
     gameState.player.enfoqueTemporada = key;
 
     document.querySelectorAll(".enfoque-card").forEach(el => el.classList.remove("enfoque-card-activa"));
-    const cardIndex = Object.keys(ENFOQUES_TEMPORADA).indexOf(key);
+    const cardIndex = gameState.player.enfoquesDisponiblesTemporada.indexOf(key);
     const cards = document.querySelectorAll(".enfoque-card");
     if (cards[cardIndex]) cards[cardIndex].classList.add("enfoque-card-activa");
 
