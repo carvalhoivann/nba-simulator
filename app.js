@@ -17,7 +17,8 @@ const gameState = {
         injuryHistory: 0, // 🆕 cuenta lesiones moderadas/graves sufridas en la carrera
         enfoqueTemporada: null, // 🆕 decisión de enfoque elegida para la temporada por jugar
         rivalTeam: null, // 🆕 equipo rival de franquicia asignado al firmar contrato
-        rivalRecord: { wins: 0, losses: 0 } // 🆕 historial de duelos narrativos contra el rival
+        rivalRecord: { wins: 0, losses: 0 }, // 🆕 historial de duelos narrativos contra el rival
+        cantidadTraspasosRecibidos: 0 // 🆕 cuenta traspasos que afectaron a TU equipo en la carrera
     },
     // Los 10 atributos obligatorios arrancan en el mínimo (1)
     attributes: {
@@ -176,9 +177,9 @@ function renderizarListaDraftHTML(listaDraft) {
 // como en la realidad. Los puntos de logros/premios se siguen sumando aparte
 // SIEMPRE, incluso en la fase de declive.
 function calcularPuntosBaseDesarrollo(experience) {
-    if (experience <= 3) return 2;   // Años 1-3: desarrollo acelerado de novato
-    if (experience <= 7) return 1;   // Años 4-7: mejoras finas de veterano
-    return 0;                        // Año 8+: el techo natural ya se tocó
+    if (experience <= 3) return 3;   // Años 1-3: desarrollo acelerado de novato
+    if (experience <= 7) return 2;   // Años 4-7: mejoras finas de veterano
+    return 1;                        // Año 8+: el techo natural ya se tocó, pero no en cero
 }
 
 // ==========================================
@@ -621,6 +622,9 @@ function calcularGRL() {
 function renderizarTarjetaJugador() {
     const player = gameState.player;
     const grl = calcularGRL();
+    const rosterHTML = typeof renderizarRosterEquipoHTML === "function"
+        ? renderizarRosterEquipoHTML(player.currentTeam)
+        : "";
 
     return `
         <div class="player-card">
@@ -637,6 +641,7 @@ function renderizarTarjetaJugador() {
                 <h3>${grl}</h3>
             </div>
         </div>
+        ${rosterHTML}
     `;
 }
 
@@ -826,24 +831,68 @@ const CALIDADES_EQUIPO = [
     }
 ];
 
+// 🆕 MEJORA: el sorteo ya no es parejo entre las 5 categorías — ahora pesa
+// la fuerza REAL del roster de tu franquicia actual (calculada a partir de
+// nba-players-db.js). Un equipo con estrellas de verdad va a tender a ser
+// Contendiente/Superequipo más seguido; uno flojo va a tender a
+// Reconstrucción/Mediocre. Sigue habiendo azar real (un equipo fuerte
+// puede tener un año gris, y viceversa), solo se inclina la balanza.
 function sortearCalidadEquipo() {
-    const pesoTotal = CALIDADES_EQUIPO.reduce((acc, t) => acc + t.probPeso, 0);
+    const fuerza = typeof calcularFuerzaRealDeEquipo === "function"
+        ? calcularFuerzaRealDeEquipo(gameState.player.currentTeam)
+        : { ataque: 65, defensa: 65 };
+
+    const nivelEquipo = (fuerza.ataque + fuerza.defensa) / 2; // ~55 a ~92 en la práctica
+    // Normalizamos a un rango -1 (equipo flojo) a +1 (equipo de elite)
+    const nivelNormalizado = Math.max(-1, Math.min(1, (nivelEquipo - 68) / 18));
+
+    // Cada tier tiene un "índice de jerarquía" (0 = Reconstrucción, 4 = Superequipo).
+    // Mientras más lejos esté el tier del nivel real del equipo, más se penaliza
+    // su peso; mientras más cerca, más se lo favorece.
+    const pesosAjustados = CALIDADES_EQUIPO.map((tier, indice) => {
+        const indiceObjetivo = 2 + nivelNormalizado * 2; // 0 a 4, centrado según nivel real
+        const distancia = Math.abs(indice - indiceObjetivo);
+        const factor = Math.max(0.15, 1.6 - distancia * 0.5); // nunca en 0: siempre hay chance de sorpresa
+        return { tier, pesoFinal: tier.probPeso * factor };
+    });
+
+    const pesoTotal = pesosAjustados.reduce((acc, t) => acc + t.pesoFinal, 0);
     let dado = Math.random() * pesoTotal;
-    for (const tier of CALIDADES_EQUIPO) {
-        if (dado < tier.probPeso) return tier;
-        dado -= tier.probPeso;
+    for (const item of pesosAjustados) {
+        if (dado < item.pesoFinal) return item.tier;
+        dado -= item.pesoFinal;
     }
     return CALIDADES_EQUIPO[CALIDADES_EQUIPO.length - 1];
 }
 
-// 🆕 caja de aviso para mostrar el contexto del equipo en los resultados.
-function renderizarCalidadEquipoHTML(calidadEquipo) {
-    if (!calidadEquipo) return "";
-    return `
-        <div class="status-box alert-equipo">
-            <p><strong>Contexto del equipo (${calidadEquipo.nombre}):</strong> ${calidadEquipo.mensaje}</p>
-        </div>
-    `;
+// 🆕 Límites de traspasos por carrera: nunca menos de MIN, nunca más de MAX.
+const MIN_AÑO_GARANTIZADO = 8;   // si a esta altura no tuviste ninguno, se fuerza la chance
+const MAX_TRASPASOS_CARRERA = 4; // techo duro por carrera
+
+function intentarTraspasoDeLaTemporada() {
+    const player = gameState.player;
+
+    if (typeof procesarTraspasoAleatorio !== "function") return null;
+    if (player.cantidadTraspasosRecibidos >= MAX_TRASPASOS_CARRERA) return null;
+
+    const necesitaEmpujon = player.experience >= MIN_AÑO_GARANTIZADO && player.cantidadTraspasosRecibidos === 0;
+
+    let traspaso;
+    if (necesitaEmpujon && Math.random() < 0.75) {
+        traspaso = forzarTraspasoAleatorio(player.currentTeam);
+    } else {
+        traspaso = procesarTraspasoAleatorio(player.currentTeam);
+    }
+
+    if (traspaso) player.cantidadTraspasosRecibidos++;
+    return traspaso;
+}
+
+// 🆕 caja de aviso — solo se genera HTML si el traspaso involucra una estrella.
+function renderizarTraspasoHTML(traspaso) {
+    if (!traspaso) return "";
+    if (typeof esTraspasoDeEstrella === "function" && !esTraspasoDeEstrella(traspaso)) return "";
+    return `<div class="status-box alert-equipo"><p>${traspaso.mensaje}</p></div>`;
 }
 
 // ==========================================
@@ -873,6 +922,122 @@ async function guardarCarreraEnHistorial(registro) {
     } catch (e) {
         console.warn("No se pudo guardar la carrera en el leaderboard global:", e);
     }
+}
+
+function construirResumenRetiro(clasificacion, puntajeLegado, conteoLogros) {
+    const player = gameState.player;
+    let sumaPts = 0, sumaAst = 0, sumaReb = 0, sumaStl = 0, sumaBlk = 0;
+    gameState.statsHistory.forEach(h => {
+        sumaPts += h.pts; sumaAst += h.ast; sumaReb += h.reb;
+        sumaStl += (h.stl || 0); sumaBlk += (h.blk || 0);
+    });
+    const años = gameState.statsHistory.length;
+    return {
+        firstName: player.firstName,
+        lastName: player.lastName,
+        position: player.position,
+        team: player.currentTeam,
+        seasons: años,
+        promedioPts: (sumaPts / años).toFixed(1),
+        promedioAst: (sumaAst / años).toFixed(1),
+        promedioReb: (sumaReb / años).toFixed(1),
+        promedioStl: (sumaStl / años).toFixed(1),
+        promedioBlk: (sumaBlk / años).toFixed(1),
+        tier: clasificacion.tier,
+        puntajeLegado: Math.round(puntajeLegado),
+        cantidadTrofeos: Object.values(conteoLogros).reduce((a, b) => a + b, 0)
+    };
+}
+
+async function guardarRetiroCompartido(resumen) {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, setDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const campo = `retiro_${gameState.player.slotPropio}`;
+        await setDoc(refPartida, { [campo]: resumen }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el retiro compartido:", e);
+    }
+}
+
+async function obtenerRetiroRivalCompartido() {
+    if (!tieneCarreraCompartida()) return null;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return null;
+        const slotRival = gameState.player.slotPropio === "slotA" ? "slotB" : "slotA";
+        return snap.data()[`retiro_${slotRival}`] || null;
+    } catch (e) {
+        console.warn("No se pudo consultar el retiro del rival:", e);
+        return null;
+    }
+}
+
+let intervaloEsperaRetiroRival = null;
+
+function mostrarPantallaEsperandoRetiroRival(resumenPropio) {
+    let esperaScreen = document.getElementById("espera-retiro-screen");
+    if (!esperaScreen) {
+        esperaScreen = document.createElement("section");
+        esperaScreen.id = "espera-retiro-screen";
+        document.getElementById("game-container").appendChild(esperaScreen);
+    }
+    esperaScreen.classList.remove("hidden");
+    esperaScreen.innerHTML = `
+        <h2>🏁 Esperando a tu compañero de partida...</h2>
+        <div class="status-box alert-equipo">
+            <p>Ya te retiraste. Cuando tu compañero también termine su carrera, vas a ver la comparativa final de ambas.</p>
+        </div>
+    `;
+
+    if (intervaloEsperaRetiroRival) clearInterval(intervaloEsperaRetiroRival);
+
+    intervaloEsperaRetiroRival = setInterval(async () => {
+        const resumenRival = await obtenerRetiroRivalCompartido();
+        if (!resumenRival) return; // sigue esperando
+
+        clearInterval(intervaloEsperaRetiroRival);
+        intervaloEsperaRetiroRival = null;
+        mostrarComparativaFinalCarreras(resumenPropio, resumenRival);
+    }, 5000);
+}
+
+function mostrarComparativaFinalCarreras(resumenPropio, resumenRival) {
+    let esperaScreen = document.getElementById("espera-retiro-screen");
+    if (!esperaScreen) {
+        esperaScreen = document.createElement("section");
+        esperaScreen.id = "espera-retiro-screen";
+        document.getElementById("game-container").appendChild(esperaScreen);
+    }
+    esperaScreen.classList.remove("hidden");
+
+    const filaComparativa = (etiqueta, valorA, valorB) => `
+        <div class="stat-box"><p>${etiqueta}</p><h3>${valorA}</h3></div>
+        <div class="stat-box"><p>${etiqueta} (rival)</p><h3>${valorB}</h3></div>
+    `;
+
+    esperaScreen.innerHTML = `
+        <h2>🏆 Comparativa Final de Carreras</h2>
+        <div class="status-box alert-equipo">
+            <p><strong>${resumenPropio.firstName} ${resumenPropio.lastName}</strong> (${resumenPropio.position}) — ${resumenPropio.seasons} temporadas — <strong>${resumenPropio.tier}</strong> (${resumenPropio.puntajeLegado} pts de legado)</p>
+            <p><strong>${resumenRival.firstName} ${resumenRival.lastName}</strong> (${resumenRival.position}) — ${resumenRival.seasons} temporadas — <strong>${resumenRival.tier}</strong> (${resumenRival.puntajeLegado} pts de legado)</p>
+        </div>
+        <div class="stats-grid">
+            ${filaComparativa("PTS", resumenPropio.promedioPts, resumenRival.promedioPts)}
+            ${filaComparativa("AST", resumenPropio.promedioAst, resumenRival.promedioAst)}
+            ${filaComparativa("REB", resumenPropio.promedioReb, resumenRival.promedioReb)}
+            ${filaComparativa("STL", resumenPropio.promedioStl, resumenRival.promedioStl)}
+            ${filaComparativa("BLK", resumenPropio.promedioBlk, resumenRival.promedioBlk)}
+        </div>
+        <div class="status-box hof-box">
+            <p class="hof-label">Veredicto Final</p>
+            <h3 class="hof-tier">${resumenPropio.puntajeLegado >= resumenRival.puntajeLegado ? `${resumenPropio.firstName} se lleva la gloria 🐐` : `${resumenRival.firstName} se lleva la gloria 🐐`}</h3>
+        </div>
+        <button onclick="location.reload()">Crear un nuevo Personaje 🔄</button>
+    `;
 }
 
 async function obtenerLeaderboardGlobal(topN = 20) {
@@ -1204,6 +1369,12 @@ function iniciarTemporadaUno() {
     const player = gameState.player;
     const { modificadorSuerte, tipoAño } = generarSuerteDelAño();
     const calidadEquipo = sortearCalidadEquipo();
+    const traspaso = intentarTraspasoDeLaTemporada();
+    if (traspaso) {
+        if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
+        gameState.traspasosAplicadosIds.add(traspaso.id);
+        if (typeof guardarTraspasoCompartido === "function") guardarTraspasoCompartido(traspaso);
+    }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
 
     const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 1, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
@@ -1221,6 +1392,7 @@ function iniciarTemporadaUno() {
         tipoAzar: tipoAño,
         mensajeLesion,
         calidadEquipo, // 🆕
+        traspaso, // 🆕
         mensajeRival, // 🆕
         logros,
         rendimientoPer36,
@@ -1267,6 +1439,7 @@ function mostrarResultadosTemporada(res) {
         <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
         <p><strong>Contexto del año:</strong> ${res.tipoAzar}</p>
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
+        ${renderizarTraspasoHTML(res.traspaso)}
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarEventoHTML(res.mensajeEvento)}
 
@@ -1345,6 +1518,12 @@ function simularAñoDos() {
     player.minutesPerGame = minutos;
 
     const calidadEquipo = sortearCalidadEquipo();
+    const traspaso = intentarTraspasoDeLaTemporada();
+    if (traspaso) {
+        if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
+        gameState.traspasosAplicadosIds.add(traspaso.id);
+        if (typeof guardarTraspasoCompartido === "function") guardarTraspasoCompartido(traspaso);
+    }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
     const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, 2, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
@@ -1361,6 +1540,7 @@ function simularAñoDos() {
         tipoAzar: tipoAño,
         mensajeLesion,
         calidadEquipo, // 🆕
+        traspaso, // 🆕
         mensajeRival, // 🆕
         logros,
         rendimientoPer36,
@@ -1403,6 +1583,7 @@ function mostrarResultadosAñoDos(res) {
         <p><strong>Equipo:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
         <p><strong>Contexto del año:</strong> ${res.tipoAzar}</p>
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
+        ${renderizarTraspasoHTML(res.traspaso)}
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
@@ -1612,6 +1793,12 @@ function simularSiguienteAño() {
     player.minutesPerGame = minutos;
 
     const calidadEquipo = sortearCalidadEquipo();
+    const traspaso = intentarTraspasoDeLaTemporada();
+    if (traspaso) {
+        if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
+        gameState.traspasosAplicadosIds.add(traspaso.id);
+        if (typeof guardarTraspasoCompartido === "function") guardarTraspasoCompartido(traspaso);
+    }
     const { pts, ast, reb, stl, blk, rendimientoPer36, impactoDefensivo, mensajeLesion, minutosReales } = calcularEstadisticasConLesion(modificadorSuerte, tipoAño);
     const { logros, bonus, candidaturas, rendimientoIndividual, rendimientoDefensivo, esRookie } = calcularLogrosDeTemporada(pts, ast, reb, stl, blk, player.experience, impactoDefensivo, calidadEquipo, tieneCarreraCompartida());
 
@@ -1628,6 +1815,7 @@ function simularSiguienteAño() {
         tipoAzar: tipoAño,
         mensajeLesion,
         calidadEquipo, // 🆕
+        traspaso, // 🆕
         mensajeRival, // 🆕
         logros,
         rendimientoPer36,
@@ -2208,6 +2396,7 @@ function mostrarPantallaBucleCarrera(res) {
         <p><strong>Equipo actual:</strong> ${res.team} | <strong>Edad:</strong> ${gameState.player.age} años</p>
         <p><strong>Rendimiento del año:</strong> ${res.tipoAzar}</p>
         ${renderizarCalidadEquipoHTML(res.calidadEquipo)}
+        ${renderizarTraspasoHTML(res.traspaso)}
         ${renderizarLesionHTML(res.mensajeLesion)}
         ${renderizarMensajeMinutosHTML(res.huboBreakout, res.huboRegresion, res.min)}
         ${renderizarEventoHTML(res.mensajeEvento)}
@@ -2434,6 +2623,20 @@ function ejecutarPantallaRetiro(motivoMensaje, fueCorteForzado = false) {
         <button onclick="mostrarLeaderboard()">Ver Leaderboard Global 🌎</button>
         <button onclick="location.reload()">Crear un nuevo Personaje 🔄</button>
     `;
+
+    // 🆕 Carrera compartida: espera a que el otro también se retire para
+    // mostrar la comparativa final de ambas carreras.
+    if (tieneCarreraCompartida()) {
+        const resumenPropio = construirResumenRetiro(clasificacion, puntajeLegado, conteoLogros);
+        guardarRetiroCompartido(resumenPropio);
+        obtenerRetiroRivalCompartido().then(resumenRival => {
+            if (resumenRival) {
+                mostrarComparativaFinalCarreras(resumenPropio, resumenRival);
+            } else {
+                mostrarPantallaEsperandoRetiroRival(resumenPropio);
+            }
+        });
+    }
 }
 
 async function mostrarLeaderboard() {
@@ -2558,6 +2761,44 @@ async function obtenerProgresoDelRivalCompartido() {
     }
 }
 
+// 🆕 Guarda un traspaso generado localmente en el documento compartido, para
+// que el otro jugador también lo vea reflejado en su copia del roster.
+async function guardarTraspasoCompartido(traspaso) {
+    if (!tieneCarreraCompartida() || !traspaso) return;
+    try {
+        const { db, doc, setDoc, arrayUnion } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        await setDoc(refPartida, { traspasosLog: arrayUnion(traspaso) }, { merge: true });
+    } catch (e) {
+        console.warn("No se pudo guardar el traspaso compartido:", e);
+    }
+}
+
+// 🆕 Trae el log completo de traspasos de la partida y aplica los que
+// todavía no procesamos localmente (rastreados por id en gameState).
+async function sincronizarTraspasosCompartidos() {
+    if (!tieneCarreraCompartida()) return;
+    try {
+        const { db, doc, getDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        const snap = await getDoc(refPartida);
+        if (!snap.exists()) return;
+
+        const log = snap.data().traspasosLog || [];
+        if (!gameState.traspasosAplicadosIds) gameState.traspasosAplicadosIds = new Set();
+
+        log.forEach(traspaso => {
+            if (gameState.traspasosAplicadosIds.has(traspaso.id)) return; // ya aplicado
+            if (typeof aplicarTraspasoRemoto === "function") {
+                aplicarTraspasoRemoto(traspaso);
+            }
+            gameState.traspasosAplicadosIds.add(traspaso.id);
+        });
+    } catch (e) {
+        console.warn("No se pudo sincronizar el log de traspasos:", e);
+    }
+}
+
 function renderizarProgresoRivalCompartidoHTML(datosRival) {
     if (!datosRival) {
         return `
@@ -2588,6 +2829,7 @@ async function sincronizarCarreraCompartida() {
     if (!tieneCarreraCompartida()) return;
 
     guardarProgresoCompartido(); // no bloqueante, no hace falta esperar
+    await sincronizarTraspasosCompartidos(); // 🆕 trae los traspasos del rival antes de refrescar la UI
 
     const actualizar = async () => {
         const contenedor = document.getElementById("rival-compartido-box");
@@ -2733,7 +2975,22 @@ function mostrarPantallaEsperandoRival(resultadoAño, continuarConMostrarFn) {
 
     intervaloEsperaCeremonia = setInterval(async () => {
         const resultadoRival = await obtenerResultadoRivalCeremonia(resultadoAño.year);
-        if (!resultadoRival) return; // sigue esperando
+
+        if (!resultadoRival) {
+            // 🆕 si el rival ya se retiró, nunca va a jugar este año: no lo esperamos más.
+            const progresoRival = await obtenerProgresoDelRivalCompartido();
+            if (progresoRival && progresoRival.isRetired) {
+                clearInterval(intervaloEsperaCeremonia);
+                intervaloEsperaCeremonia = null;
+
+                const { logros, bonus } = resolverPremiosCompartidos(resultadoAño, null);
+                resultadoAño.logros = logros;
+
+                continuarConMostrarFn(resultadoAño, bonus);
+                return;
+            }
+            return; // sigue esperando
+        }
 
         clearInterval(intervaloEsperaCeremonia);
         intervaloEsperaCeremonia = null;
