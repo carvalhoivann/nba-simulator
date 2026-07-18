@@ -1952,8 +1952,6 @@ async function iniciarTemporadaUno() {
         mensajeRival, // 🆕
         logros,
         rendimientoPer36,
-        logros,
-        rendimientoPer36,
         candidaturas,          // 🆕
         rendimientoIndividual, // 🆕
         rendimientoDefensivo,  // 🆕
@@ -2017,9 +2015,11 @@ function mostrarResultadosTemporada(res) {
         </div>
 
         <button onclick="irAEntrenamientoAñoDos()">Ir a entrenar para el Año 2 🏋️‍♂️</button>
+        <button class="btn-secundario" onclick="mostrarColeccionCartas()">Ver mi Colección de Cartas 🎴</button>
         ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
+    reproducirFeedbackDeTemporada(res); // 🆕
     sincronizarCarreraCompartida();
 }
 
@@ -2109,8 +2109,6 @@ async function simularAñoDos() {
         huboBreakout,      // 🆕
         huboRegresion,      // 🆕
         mensajePeleaMinutos, // 🆕
-        logros,
-        rendimientoPer36,
         candidaturas,          // 🆕
         rendimientoIndividual, // 🆕
         rendimientoDefensivo,  // 🆕
@@ -2168,9 +2166,11 @@ function mostrarResultadosAñoDos(res) {
         </div>
 
         <button onclick="procesarAgenciaLibreOGameOver()">Ir a la Oficina: Ver ofertas o Retiro 💼</button>
+        <button class="btn-secundario" onclick="mostrarColeccionCartas()">Ver mi Colección de Cartas 🎴</button>
         ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
+    reproducirFeedbackDeTemporada(res); // 🆕
     sincronizarCarreraCompartida();
 }
 
@@ -2447,8 +2447,6 @@ async function simularSiguienteAño() {
         rendimientoPer36,
         huboBreakout,
         huboRegresion,
-        logros,
-        rendimientoPer36,
         candidaturas,          // 🆕
         rendimientoIndividual, // 🆕
         rendimientoDefensivo,  // 🆕
@@ -2622,18 +2620,6 @@ function seleccionarEnfoque(key) {
 
     actualizarEstadoBotonConfirmar();
 }
-
-// 🆕 el botón de confirmar ahora exige DOS condiciones: puntos repartidos Y
-// enfoque elegido. Se centraliza acá para no duplicar la lógica en cada
-// pantalla de entrenamiento.
-function actualizarEstadoBotonConfirmar() {
-    const btnConfirmar = document.getElementById("btn-confirmar-atributos");
-    if (!btnConfirmar) return;
-    const puntosListos = gameState.player.availablePoints === 0;
-    const enfoqueListo = gameState.player.enfoqueTemporada !== null;
-    btnConfirmar.disabled = !(puntosListos && enfoqueListo);
-}
-
 
 // Antes no existía ningún riesgo de lesión: el único desgaste físico venía
 // del declive determinístico por edad (procesarDecliveFisico). Ahora cada
@@ -3240,9 +3226,11 @@ function mostrarPantallaBucleCarrera(res) {
         ${renderizarDetallesTemporadaHTML(res)}
 
         ${seccionAcciones}
+        <button class="btn-secundario" onclick="mostrarColeccionCartas()">Ver mi Colección de Cartas 🎴</button>
         ${tieneCarreraCompartida() ? `<button onclick="mostrarRecordsPartida()">Ver Récords de la Partida 🔥</button>` : ""}
     `;
 
+    reproducirFeedbackDeTemporada(res); // 🆕
     sincronizarCarreraCompartida();
 }
 
@@ -3368,6 +3356,7 @@ function clasificarHOF(puntaje, fueCorteForzado) {
 // INTERFAZ: PANTALLA DE RETIRO DEFINITIVO
 // ==========================================
 function ejecutarPantallaRetiro(motivoMensaje, fueCorteForzado = false) {
+    if (fueCorteForzado) sonidoBuzzer(); // 🆕
     // 🆕 FIX: antes esta función solo ocultaba season-screen y office-screen.
     // Si el retiro se disparaba desde la pantalla de entrenamiento (draft-screen
     // reutilizado para repartir puntos entre temporadas), esa pantalla seguía
@@ -3442,6 +3431,7 @@ function ejecutarPantallaRetiro(motivoMensaje, fueCorteForzado = false) {
         </div>
 
         <p>Tu historia en este simulador quedó sellada.</p>
+        <button class="btn-secundario" onclick="mostrarColeccionCartas()">Ver mi Colección de Cartas 🎴</button>
         <button onclick="mostrarLeaderboard()">Ver Leaderboard Global 🌎</button>
         <button onclick="location.reload()">Crear un nuevo Personaje 🔄</button>
     `;

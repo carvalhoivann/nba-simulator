@@ -884,3 +884,116 @@ button:focus-visible {
 .temporada-detalles-contenido .status-box {
     margin-bottom: 0;
 }
+
+/* ==========================================================
+   🆕 NUEVO — BOTÓN SECUNDARIO (acciones no principales, como
+   abrir la galería de cartas). Mismo lenguaje visual que el
+   botón normal, pero sin el peso del acento naranja.
+   ========================================================== */
+.btn-secundario {
+    background: var(--court-raised);
+    color: var(--net);
+    border: 1px solid var(--line);
+    margin-top: 10px;
+}
+
+.btn-secundario:hover:not(:disabled) {
+    background: var(--ink);
+    border-color: var(--hardwood-dim);
+}
+
+.btn-secundario:active:not(:disabled) {
+    background: var(--ink);
+    transform: translateY(1px);
+}
+
+/* ==========================================================
+   🆕 NUEVO — CARTAS COLECCIONABLES DE TEMPORADA
+   Estilo "trading card": borde de color según rareza (definido
+   por --rareza-color inline), header con rareza + año, stats
+   en fila monoespaciada. Grilla responsive en la galería.
+   ========================================================== */
+.cards-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin: 18px 0;
+}
+
+.trading-card {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--rareza-color) 14%, var(--court)), var(--court) 65%);
+    border: 1px solid var(--rareza-color);
+    border-radius: 10px;
+    padding: 14px 14px 16px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.trading-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.trading-card-rareza {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rareza-color);
+}
+
+.trading-card-year {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.trading-card h4 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: var(--net);
+    margin: 0 0 2px;
+}
+
+.trading-card-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin: 0 0 12px;
+}
+
+.trading-card-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.trading-card-stats span {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--net);
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 3px 7px;
+}
+
+.trading-card-tipo {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.35;
+}
+
+@media (max-width: 380px) {
+    .cards-grid {
+        grid-template-columns: 1fr;
+    }
+}
