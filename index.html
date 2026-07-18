@@ -30,7 +30,21 @@
                     <option value="Pívot">Pívot</option>
                 </select>
             </div>
-            
+
+            <hr>
+            <h3>🆚 Modo Carrera Compartida (opcional)</h3>
+            <div class="form-group">
+                <label for="codigo-partida">Código de partida:</label>
+                <input type="text" id="codigo-partida" placeholder="Ej: LOSPIBES2026 (dejalo vacío para jugar solo)">
+            </div>
+            <div class="form-group">
+                <label for="slot-jugador">Tu lugar en la partida:</label>
+                <select id="slot-jugador">
+                    <option value="slotA">Jugador A</option>
+                    <option value="slotB">Jugador B</option>
+                </select>
+            </div>
+
             <button id="btn-draft" onclick="simularDraft()">Entrar al Draft Aleatorio 🎲</button>
         </section>
 
