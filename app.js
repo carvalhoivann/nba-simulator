@@ -478,7 +478,7 @@ function generarSuerteDelAño() {
     return { modificadorSuerte, tipoAño };
 }
 
-function calcularEstadisticasDelAño() {
+function calcularEstadisticasDelAño(modificadorSuerte, tipoAño) {
     const attrs = gameState.attributes;
     const player = gameState.player;
     const bonoPos = obtenerBonoPosicion(player.position);
