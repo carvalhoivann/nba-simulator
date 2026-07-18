@@ -498,6 +498,17 @@ async function simularDraft() {
     gameState.player.codigoPartida = codigoIngresado || null;
     gameState.player.slotPropio = codigoIngresado ? document.getElementById("slot-jugador").value : null;
 
+    // 🆕 Si elegís "partida nueva" con un código, borramos cualquier resto de
+    // una carrera anterior guardada bajo ese mismo código antes de arrancar.
+    if (codigoIngresado) {
+        const modoCodigo = document.getElementById("modo-codigo").value;
+        if (modoCodigo === "nueva") {
+            const confirmar = confirm("Vas a borrar cualquier partida anterior guardada con este código. Si tu compañero ya está jugando con este mismo código, sus datos se van a perder. ¿Confirmás que es una partida NUEVA?");
+            if (!confirmar) return; // cancela para que se pongan de acuerdo antes
+            await borrarPartidaCompartidaSiExiste();
+        }
+    }
+
     // 🆕 si hay carrera compartida, mira qué pick ya ocupó el rival (si ya
     // hizo su Draft) para no repetir el mismo número.
     let pickOcupadoPorRival = null;
@@ -553,6 +564,17 @@ async function simularDraft() {
         nombre: `${inputNombre} ${inputApellido}`,
         posicion: selectPosicion
     });
+
+async function borrarPartidaCompartidaSiExiste() {
+    if (!gameState.player.codigoPartida) return;
+    try {
+        const { db, doc, deleteDoc } = window.firestoreDB;
+        const refPartida = doc(db, "partidas_en_vivo", gameState.player.codigoPartida);
+        await deleteDoc(refPartida);
+    } catch (e) {
+        console.warn("No se pudo borrar la partida compartida anterior:", e);
+    }
+}
 
     mostrarPantallaAsignacion(pickAleatorio, equipoAleatorio, puntosOtorgados, minutosIniciales);
 }
