@@ -216,6 +216,7 @@ button {
     width: 100%;
     cursor: pointer;
     transition: background-color 0.15s ease, transform 0.1s ease;
+    touch-action: manipulation; /* 🆕 evita el zoom por doble-tap en mobile */
 }
 
 button:hover:not(:disabled) {
@@ -710,6 +711,7 @@ button:focus-visible {
     padding: 14px 16px;
     cursor: pointer;
     transition: border-color 0.15s ease, background-color 0.15s ease;
+    touch-action: manipulation; /* 🆕 */
 }
 
 .enfoque-card:hover {
