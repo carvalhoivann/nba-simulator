@@ -2094,3 +2094,19 @@ async function mostrarLeaderboard() {
         <ul class="career-trophy-list">${filas}</ul>
     `;
 }
+
+// ==========================================
+// 🆕 FIX: BLOQUEO DE ZOOM POR DOBLE-TAP (mobile)
+// ==========================================
+// touch-action: manipulation y el meta viewport no alcanzan en todos los
+// navegadores (Safari/iOS ignora user-scalable=no por política de
+// accesibilidad). Esto intercepta el gesto de doble-tap directamente y
+// cancela el zoom, sin bloquear el resto de los toques normales.
+let ultimoToque = 0;
+document.addEventListener("touchend", (e) => {
+    const ahora = Date.now();
+    if (ahora - ultimoToque <= 300) {
+        e.preventDefault();
+    }
+    ultimoToque = ahora;
+}, { passive: false });
